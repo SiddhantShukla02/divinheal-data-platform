@@ -45,3 +45,7 @@ data/errors/*
 Thumbs.db
 .vscode/
 .idea/
+
+# Generated human-facing outputs
+outputs/*
+!outputs/.gitkeep
