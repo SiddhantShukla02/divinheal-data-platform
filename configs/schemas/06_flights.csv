@@ -1,0 +1,20 @@
+origin_country_slug,origin_city,origin_iata,destination_country_slug,destination_city,destination_iata,flight_type,duration_hours,airlines_operating,fare_low_usd,fare_high_usd,frequency_per_week,sample_date,source,verified_date,verified_by
+bangladesh,Dhaka,DAC,india,Kolkata,CCU,direct,1.17,"IndiGo;US-Bangla Airlines;Biman Bangladesh",110,250,35,2026-01-15,Amadeus API,2026-01-15,Chittrang
+bangladesh,Dhaka,DAC,india,Chennai,MAA,direct,3.08,"IndiGo;Biman Bangladesh",200,450,14,2026-01-15,Amadeus API,2026-01-15,Chittrang
+bangladesh,Dhaka,DAC,india,New Delhi,DEL,direct,2.50,"IndiGo;Biman Bangladesh;Air India",180,420,21,2026-01-15,Amadeus API,2026-01-15,Chittrang
+bangladesh,Dhaka,DAC,india,Mumbai,BOM,direct,3.75,"IndiGo;Air India",250,550,7,2026-01-15,Amadeus API,2026-01-15,Chittrang
+bangladesh,Chittagong,CGP,india,Kolkata,CCU,direct,1.25,"IndiGo;US-Bangla Airlines",130,270,7,2026-01-15,Amadeus API,2026-01-15,Chittrang
+ethiopia,Addis Ababa,ADD,india,Mumbai,BOM,direct,5.50,"Ethiopian Airlines",380,720,7,2026-01-15,Amadeus API,2026-01-15,Chittrang
+ethiopia,Addis Ababa,ADD,india,New Delhi,DEL,direct,6.75,"Ethiopian Airlines",420,780,5,2026-01-15,Amadeus API,2026-01-15,Chittrang
+saudi_arabia,Riyadh,RUH,india,Mumbai,BOM,direct,4.50,"Air India;Saudia;IndiGo",280,620,28,2026-01-15,Amadeus API,2026-01-15,Chittrang
+saudi_arabia,Riyadh,RUH,india,New Delhi,DEL,direct,5.50,"Saudia;Air India",320,700,14,2026-01-15,Amadeus API,2026-01-15,Chittrang
+saudi_arabia,Jeddah,JED,india,Mumbai,BOM,direct,5.00,"Saudia;Air India;IndiGo",300,680,21,2026-01-15,Amadeus API,2026-01-15,Chittrang
+saudi_arabia,Dammam,DMM,india,Mumbai,BOM,direct,4.25,"IndiGo;Air India",260,580,14,2026-01-15,Amadeus API,2026-01-15,Chittrang
+uae,Dubai,DXB,india,Mumbai,BOM,direct,3.25,"Emirates;Air India;IndiGo;flydubai",180,450,84,2026-01-15,Amadeus API,2026-01-15,Chittrang
+uae,Dubai,DXB,india,New Delhi,DEL,direct,3.50,"Emirates;Air India;IndiGo",190,480,70,2026-01-15,Amadeus API,2026-01-15,Chittrang
+uae,Abu Dhabi,AUH,india,Mumbai,BOM,direct,3.50,"Etihad;Air India",200,500,42,2026-01-15,Amadeus API,2026-01-15,Chittrang
+oman,Muscat,MCT,india,Mumbai,BOM,direct,3.00,"Oman Air;IndiGo;Air India",170,420,35,2026-01-15,Amadeus API,2026-01-15,Chittrang
+kenya,Nairobi,NBO,india,Mumbai,BOM,direct,5.50,"Kenya Airways;Air India",420,800,7,2026-01-15,Amadeus API,2026-01-15,Chittrang
+nigeria,Lagos,LOS,india,Mumbai,BOM,connecting,12.00,"Ethiopian Airlines via ADD;Emirates via DXB",650,1100,14,2026-01-15,Amadeus API,2026-01-15,Chittrang
+united_kingdom,London,LHR,india,Mumbai,BOM,direct,9.25,"British Airways;Air India;Virgin Atlantic",450,950,28,2026-01-15,Amadeus API,2026-01-15,Chittrang
+united_kingdom,London,LHR,india,New Delhi,DEL,direct,8.75,"British Airways;Air India;Vistara",420,900,35,2026-01-15,Amadeus API,2026-01-15,Chittrang

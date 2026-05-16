@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment/secrets
+.env
+.env.*
+!.env.example
+
+# Local database
+data/local/*.sqlite
+data/local/*.db
+data/local/*.sqlite3
+
+# Generated data artifacts
+data/raw/*
+data/normalized/*
+data/errors/*
+
+# Keep data folders
+!data/raw/.gitkeep
+!data/normalized/.gitkeep
+!data/errors/.gitkeep
+!data/local/.gitkeep
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
