@@ -1,6 +1,6 @@
 # Architecture Decisions
 
-This file records important project decisions so future chats, Codex sessions, and contributors do not lose context.
+This file records important project decisions so future contributors do not lose context.
 
 ## 2026-05-16 — Standalone repository
 

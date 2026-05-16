@@ -1,6 +1,6 @@
-# Codex Rules
+# Development Rules
 
-These rules must be followed by Codex sessions and coding assistants working on this repository.
+These rules should be followed by contributors working on this repository.
 
 ## Read first
 
@@ -16,7 +16,7 @@ Before making changes, read:
 
 This repository is a standalone Divinheal data platform.
 
-Do not copy architecture, assumptions, or technical debt from the old blog/content pipeline.
+Do not copy architecture, assumptions, or technical debt from unrelated projects.
 
 The notebook in `notebooks/reference/` is reference material only. Do not convert it directly into production code without review.
 
