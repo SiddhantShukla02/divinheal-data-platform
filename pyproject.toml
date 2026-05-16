@@ -20,6 +20,9 @@ dev = [
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+exclude = [
+    "notebooks/reference/**",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
