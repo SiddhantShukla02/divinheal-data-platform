@@ -139,7 +139,7 @@ def write_csv(path: Path, rows: list[dict[str, str]], columns: list[str]) -> Non
 
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    with path.open("w", encoding="utf-8", newline="") as file:
+    with path.open("w", encoding="utf-8-sig", newline="") as file:
         writer = csv.DictWriter(file, fieldnames=columns)
         writer.writeheader()
         writer.writerows(rows)
