@@ -46,6 +46,9 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font
+from openpyxl.utils import get_column_letter
 
 from divinheal_data.core.run_context import RunContext
 from divinheal_data.core.settings import load_settings
@@ -150,6 +153,54 @@ def write_csv(path: Path, rows: list[dict[str, str]], columns: list[str]) -> Non
         writer = csv.DictWriter(file, fieldnames=columns)
         writer.writeheader()
         writer.writerows(rows)
+
+
+def write_xlsx(path: Path, rows: list[dict[str, str]], columns: list[str]) -> None:
+    """Write rows to a human-friendly Excel workbook."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = "patient_profiles"
+
+    worksheet.append(columns)
+
+    for row in rows:
+        worksheet.append([row.get(column, "") for column in columns])
+
+    header_font = Font(bold=True)
+    header_alignment = Alignment(wrap_text=True, vertical="top")
+
+    for cell in worksheet[1]:
+        cell.font = header_font
+        cell.alignment = header_alignment
+
+    worksheet.freeze_panes = "A2"
+    worksheet.auto_filter.ref = worksheet.dimensions
+
+    wrapped_columns = {
+        "source_population",
+        "source_fx",
+        "filled_fields",
+        "missing_fields",
+        "needs_review_fields",
+    }
+
+    for column_index, column_name in enumerate(columns, start=1):
+        column_letter = get_column_letter(column_index)
+        max_length = len(column_name)
+
+        for cell in worksheet[column_letter]:
+            cell_value = "" if cell.value is None else str(cell.value)
+            max_length = max(max_length, len(cell_value))
+
+            if column_name in wrapped_columns:
+                cell.alignment = Alignment(wrap_text=True, vertical="top")
+
+        worksheet.column_dimensions[column_letter].width = min(max_length + 2, 60)
+
+    workbook.save(path)
 
 
 def write_json(path: Path, payload: Any) -> None:
@@ -582,9 +633,11 @@ def run_pipeline() -> dict[str, Any]:
     )
 
     output_csv_path = LATEST_OUTPUT_DIR / "patient_country_destination_profiles.csv"
+    output_xlsx_path = LATEST_OUTPUT_DIR / "FOR_READING_patient_country_destination_profiles.xlsx"
     summary_path = LATEST_OUTPUT_DIR / "run_summary.json"
 
     write_csv(output_csv_path, rows, target_columns)
+    write_xlsx(output_xlsx_path, rows, target_columns)
 
     missing_fields_report_path = LATEST_OUTPUT_DIR / "missing_fields_report.csv"
     missing_fields_report_columns = [
@@ -618,6 +671,8 @@ def run_pipeline() -> dict[str, Any]:
         "exchange_rate_failed_currency_count": len(exchange_rate_failures),
         "exchange_rate_failures": exchange_rate_failures,
         "output_csv_path": str(output_csv_path.relative_to(PROJECT_ROOT)),
+        "output_xlsx_path": str(output_xlsx_path.relative_to(PROJECT_ROOT)),
+        "missing_fields_report_path": str(missing_fields_report_path.relative_to(PROJECT_ROOT)),
         "raw_population_dir": str(
             (RAW_DATA_ROOT / context.run_id / "world_bank_population").relative_to(
                 PROJECT_ROOT
@@ -626,7 +681,6 @@ def run_pipeline() -> dict[str, Any]:
         "raw_exchange_rate_dir": str(
             (RAW_DATA_ROOT / context.run_id / "exchange_rates").relative_to(PROJECT_ROOT)
         ),
-        "missing_fields_report_path": str(missing_fields_report_path.relative_to(PROJECT_ROOT)),
         "notes": [
             "Generated origin country and destination country matrix.",
             "Filled config identity fields.",

@@ -31,6 +31,7 @@ import json
 from pathlib import Path
 
 import pytest
+from openpyxl import load_workbook
 
 from divinheal_data.core.run_context import RunContext
 from divinheal_data.core.statuses import RecordStatus
@@ -53,6 +54,7 @@ from divinheal_data.pipelines.patient_country_destination_profiles import (
     read_yaml_list,
     write_csv,
     write_json,
+    write_xlsx,
 )
 
 
@@ -643,7 +645,7 @@ def test_build_missing_fields_report_handles_empty_rows() -> None:
         },
     ]
 
-    
+
 def test_write_csv_writes_rows_with_target_column_order(tmp_path: Path) -> None:
     output_path = tmp_path / "nested" / "output.csv"
     rows = [
@@ -680,3 +682,31 @@ def test_write_json_writes_readable_json(tmp_path: Path) -> None:
         saved_payload = json.load(file)
 
     assert saved_payload == payload
+
+
+def test_write_xlsx_writes_human_readable_workbook(tmp_path: Path) -> None:
+    output_path = tmp_path / "nested" / "output.xlsx"
+    rows = [
+        {
+            "first_column": "A",
+            "second_column": "B",
+        }
+    ]
+
+    write_xlsx(
+        path=output_path,
+        rows=rows,
+        columns=["first_column", "second_column"],
+    )
+
+    workbook = load_workbook(output_path)
+    worksheet = workbook.active
+
+    assert worksheet.title == "patient_profiles"
+    assert worksheet["A1"].value == "first_column"
+    assert worksheet["B1"].value == "second_column"
+    assert worksheet["A2"].value == "A"
+    assert worksheet["B2"].value == "B"
+    assert worksheet.freeze_panes == "A2"
+    assert worksheet.auto_filter.ref == "A1:B2"
+    assert worksheet["A1"].font.bold is True
