@@ -57,6 +57,10 @@ from divinheal_data.sources.exchange_rates import ExchangeRateResult, get_exchan
 from divinheal_data.sources.world_bank_population import PopulationResult, get_population_for_country
 
 
+# -----------------------------------------------------------------------------
+# PATHS AND CONSTANTS
+# -----------------------------------------------------------------------------
+
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 ORIGIN_COUNTRIES_CONFIG_PATH = PROJECT_ROOT / "configs/origin_countries.yml"
@@ -110,6 +114,11 @@ SOURCE_REQUIRED_FIELDS = [
 ]
 
 
+
+# -----------------------------------------------------------------------------
+# CONFIG AND SCHEMA READERS
+# -----------------------------------------------------------------------------
+
 def read_target_columns(path: Path) -> list[str]:
     """Read the target schema header row."""
 
@@ -143,6 +152,10 @@ def read_destinations(path: Path) -> list[dict[str, str]]:
 
     return read_yaml_list(path=path, key="destinations")
 
+
+# -----------------------------------------------------------------------------
+# OUTPUT WRITERS
+# -----------------------------------------------------------------------------
 
 def write_csv(path: Path, rows: list[dict[str, str]], columns: list[str]) -> None:
     """Write rows to CSV using the target schema column order."""
@@ -212,6 +225,10 @@ def write_json(path: Path, payload: Any) -> None:
         json.dump(payload, file, indent=2, ensure_ascii=False)
 
 
+# -----------------------------------------------------------------------------
+# REPORT BUILDERS
+# -----------------------------------------------------------------------------
+
 def build_missing_fields_report(
     rows: list[dict[str, str]],
     target_columns: list[str],
@@ -242,6 +259,10 @@ def build_missing_fields_report(
     return report_rows
 
 
+# -----------------------------------------------------------------------------
+# RAW SOURCE PATH BUILDERS
+# -----------------------------------------------------------------------------
+
 def build_population_raw_path(context: RunContext, origin_iso_country_code: str) -> Path:
     """Build the raw JSON path for one origin country's World Bank response."""
 
@@ -258,6 +279,10 @@ def build_exchange_rate_raw_path(context: RunContext, origin_currency_code: str)
     return RAW_DATA_ROOT / context.run_id / "exchange_rates" / f"{safe_currency_code}.json"
 
 
+# -----------------------------------------------------------------------------
+# EXCHANGE-RATE TARGET HELPERS
+# -----------------------------------------------------------------------------
+
 def get_destination_currency_codes(destinations: list[dict[str, str]]) -> list[str]:
     """Return unique destination currency codes plus USD for exchange-rate enrichment."""
 
@@ -271,6 +296,9 @@ def get_destination_currency_codes(destinations: list[dict[str, str]]) -> list[s
 
     return sorted(currency_codes)
 
+# -----------------------------------------------------------------------------
+# SOURCE ENRICHMENT FETCHERS
+# -----------------------------------------------------------------------------
 
 def fetch_population_results(
     origins: list[dict[str, str]],
@@ -379,6 +407,10 @@ def fetch_exchange_rate_results(
     return exchange_rates_by_currency_code, failures
 
 
+# -----------------------------------------------------------------------------
+# SOURCE VALUE BUILDERS
+# -----------------------------------------------------------------------------
+
 def build_source_population_value(population_result: PopulationResult | None) -> str:
     """Build the source description for the population field."""
 
@@ -424,6 +456,10 @@ def get_exchange_rate_for_target(
 
     return str(rate)
 
+
+# -----------------------------------------------------------------------------
+# FIELD STATUS BUILDERS
+# -----------------------------------------------------------------------------
 
 def build_missing_fields(
     population_result: PopulationResult | None,
@@ -483,6 +519,10 @@ def build_filled_fields(
 
     return fields
 
+
+# -----------------------------------------------------------------------------
+# ROW BUILDERS
+# -----------------------------------------------------------------------------
 
 def build_profile_row(
     origin: dict[str, str],
@@ -602,6 +642,10 @@ def build_profiles(
     return rows
 
 
+# -----------------------------------------------------------------------------
+# ROW BUILDERS
+# -----------------------------------------------------------------------------
+
 def run_pipeline() -> dict[str, Any]:
     """Run the patient country destination profile pipeline."""
 
@@ -695,6 +739,9 @@ def run_pipeline() -> dict[str, Any]:
 
     return summary
 
+# -----------------------------------------------------------------------------
+# CLI ENTRY POINT
+# -----------------------------------------------------------------------------
 
 def main() -> None:
     """CLI entry point for manual local runs."""
