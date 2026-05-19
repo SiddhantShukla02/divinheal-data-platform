@@ -35,12 +35,18 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
+import requests
+
 from google import genai
 from google.genai import types
 
 
 GEMINI_MODEL_NAME = "gemini-2.5-flash"
 GEMINI_MAX_OUTPUT_TOKENS = 8192
+SOURCE_URL_VERIFY_TIMEOUT_SECONDS = 10
+SOURCE_URL_VERIFY_USER_AGENT = (
+    "Mozilla/5.0 (compatible; DivinhealDataVerification/1.0)"
+)
 
 ALLOWED_ESTIMATE_TYPES = {"range", "directional", "insufficient_evidence"}
 ALLOWED_CONFIDENCE_VALUES = {"high", "medium", "low", "insufficient"}
@@ -231,6 +237,195 @@ def has_source_url(sources: list[dict[str, str]]) -> bool:
     return any(source.get("source_url", "").strip() for source in sources)
 
 
+def get_source_url_verification_status(
+    source_url: str,
+    timeout_seconds: int = SOURCE_URL_VERIFY_TIMEOUT_SECONDS,
+) -> str:
+    """Return source URL verification status: reachable, hard_dead, or unknown."""
+
+    normalized_source_url = source_url.strip()
+
+    if not normalized_source_url.startswith(("http://", "https://")):
+        return "hard_dead"
+
+    headers = {
+        "User-Agent": SOURCE_URL_VERIFY_USER_AGENT,
+    }
+
+    try:
+        head_response = requests.head(
+            normalized_source_url,
+            headers=headers,
+            allow_redirects=True,
+            timeout=timeout_seconds,
+        )
+
+        if 200 <= head_response.status_code < 400:
+            return "reachable"
+
+        if head_response.status_code in {404, 410}:
+            return "hard_dead"
+
+        if head_response.status_code in {401, 403, 405, 408, 429, 500, 502, 503, 504}:
+            return "unknown"
+    except requests.RequestException:
+        pass
+
+    try:
+        get_response = requests.get(
+            normalized_source_url,
+            headers=headers,
+            allow_redirects=True,
+            stream=True,
+            timeout=timeout_seconds,
+        )
+
+        if 200 <= get_response.status_code < 400:
+            return "reachable"
+
+        if get_response.status_code in {404, 410}:
+            return "hard_dead"
+
+        return "unknown"
+    except requests.RequestException:
+        return "unknown"
+
+
+def estimate_to_payload(estimate: OutboundMedicalTravelEstimate) -> dict[str, Any]:
+    """Convert an outbound estimate dataclass back into JSON-serializable payload."""
+
+    return {
+        "destination_country": estimate.destination_country,
+        "estimated_annual_outbound_medical_travel": (
+            estimate.estimated_annual_outbound_medical_travel
+        ),
+        "estimated_share_to_destination_pct": estimate.estimated_share_to_destination_pct,
+        "estimate_type": estimate.estimate_type,
+        "estimate_year_or_period": estimate.estimate_year_or_period,
+        "confidence": estimate.confidence,
+        "status": estimate.status,
+        "source_outbound_stats": estimate.source_outbound_stats,
+        "sources": estimate.sources,
+        "caveats": estimate.caveats,
+    }
+
+
+def downgrade_estimate_for_dead_sources(
+    estimate: OutboundMedicalTravelEstimate,
+) -> OutboundMedicalTravelEstimate:
+    """Downgrade a source-backed estimate when every cited URL is hard-dead."""
+
+    caveats = estimate.caveats.copy()
+    caveats.append(
+        "Downgraded to insufficient_evidence because every cited source URL returned "
+        "a hard-dead status during automated URL verification."
+    )
+
+    return OutboundMedicalTravelEstimate(
+        destination_country=estimate.destination_country,
+        estimated_annual_outbound_medical_travel="",
+        estimated_share_to_destination_pct="",
+        estimate_type="insufficient_evidence",
+        estimate_year_or_period="",
+        confidence="insufficient",
+        status="insufficient_evidence",
+        source_outbound_stats="",
+        sources=estimate.sources,
+        caveats=caveats,
+    )
+
+
+def verify_estimate_source_urls(
+    estimate: OutboundMedicalTravelEstimate,
+) -> OutboundMedicalTravelEstimate:
+    """Verify source URLs for one estimate without over-penalizing blocked sites."""
+
+    if estimate.estimate_type == "insufficient_evidence":
+        return estimate
+
+    reachable_sources = []
+    unknown_sources = []
+    hard_dead_sources = []
+
+    for source in estimate.sources:
+        source_url = source.get("source_url", "")
+        verification_status = get_source_url_verification_status(source_url)
+
+        source_with_status = {
+            **source,
+            "url_verification_status": verification_status,
+        }
+
+        if verification_status == "reachable":
+            reachable_sources.append(source_with_status)
+        elif verification_status == "hard_dead":
+            hard_dead_sources.append(source_with_status)
+        else:
+            unknown_sources.append(source_with_status)
+
+    usable_sources = reachable_sources + unknown_sources
+
+    if not usable_sources:
+        return downgrade_estimate_for_dead_sources(estimate)
+
+    caveats = estimate.caveats.copy()
+
+    if unknown_sources and not reachable_sources:
+        caveats.append(
+            "Automated URL verification could not confirm source reachability. "
+            "Sources may be blocked, moved, rate-limited, or require manual browser review."
+        )
+
+    if hard_dead_sources:
+        caveats.append(
+            f"{len(hard_dead_sources)} cited source URL(s) returned hard-dead status "
+            "and were removed from the usable source list."
+        )
+
+    confidence = estimate.confidence
+    if unknown_sources and not reachable_sources and confidence == "high":
+        confidence = "medium"
+
+    return OutboundMedicalTravelEstimate(
+        destination_country=estimate.destination_country,
+        estimated_annual_outbound_medical_travel=(
+            estimate.estimated_annual_outbound_medical_travel
+        ),
+        estimated_share_to_destination_pct=estimate.estimated_share_to_destination_pct,
+        estimate_type=estimate.estimate_type,
+        estimate_year_or_period=estimate.estimate_year_or_period,
+        confidence=confidence,
+        status=estimate.status,
+        source_outbound_stats=estimate.source_outbound_stats,
+        sources=usable_sources,
+        caveats=caveats,
+    )
+
+
+def validate_and_verify_batch_response(
+    parsed_response: dict[str, Any],
+    expected_origin_country: str,
+    expected_destination_countries: list[str],
+    verify_source_urls: bool = False,
+) -> tuple[list[OutboundMedicalTravelEstimate], dict[str, Any]]:
+    """Validate a parsed Gemini batch response and optionally verify source URLs."""
+
+    estimates = validate_batch_response(
+        parsed_response=parsed_response,
+        expected_origin_country=expected_origin_country,
+        expected_destination_countries=expected_destination_countries,
+    )
+
+    if verify_source_urls:
+        estimates = [verify_estimate_source_urls(estimate) for estimate in estimates]
+
+    verified_parsed_response = {
+        "origin_country": expected_origin_country,
+        "results": [estimate_to_payload(estimate) for estimate in estimates],
+    }
+
+    return estimates, verified_parsed_response
+
 def validate_source_item(source: Any) -> dict[str, str]:
     """Validate and normalize one source item."""
 
@@ -397,6 +592,7 @@ def get_outbound_medical_travel_estimates_for_origin(
     origin_country: str,
     destination_countries: list[str],
     gemini_api_key: str,
+    verify_source_urls: bool = False,
 ) -> OutboundMedicalTravelBatchResult:
     """Fetch and validate outbound medical travel estimates for one origin country."""
 
@@ -409,15 +605,16 @@ def get_outbound_medical_travel_estimates_for_origin(
         gemini_api_key=gemini_api_key,
     )
     parsed_response = parse_json_response_text(raw_text)
-    estimates = validate_batch_response(
+    estimates, verified_parsed_response = validate_and_verify_batch_response(
         parsed_response=parsed_response,
         expected_origin_country=origin_country,
         expected_destination_countries=destination_countries,
+        verify_source_urls=verify_source_urls,
     )
 
     return OutboundMedicalTravelBatchResult(
         origin_country=origin_country,
         results=estimates,
         raw_text=raw_text,
-        parsed_response=parsed_response,
+        parsed_response=verified_parsed_response,
     )

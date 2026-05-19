@@ -57,7 +57,8 @@ from divinheal_data.sources.ai_outbound_medical_travel import (
     OutboundMedicalTravelBatchResult,
     OutboundMedicalTravelEstimate,
     get_outbound_medical_travel_estimates_for_origin,
-    validate_batch_response,
+    parse_json_response_text,
+    validate_and_verify_batch_response,
 )
 from divinheal_data.sources.exchange_rates import ExchangeRateResult, get_exchange_rates_for_currency
 from divinheal_data.sources.world_bank_population import PopulationResult, get_population_for_country
@@ -495,14 +496,33 @@ def fetch_ai_outbound_estimate_results(
                 )
 
                 cached_payload = read_json(cache_path)
-                parsed_response = cached_payload.get("parsed_response", {})
                 raw_text = cached_payload.get("raw_text", "")
 
-                estimates = validate_batch_response(
+                if raw_text:
+                    parsed_response = parse_json_response_text(raw_text)
+                else:
+                    parsed_response = cached_payload.get("parsed_response", {})
+
+                estimates, verified_parsed_response = validate_and_verify_batch_response(
                     parsed_response=parsed_response,
                     expected_origin_country=origin_country_name,
                     expected_destination_countries=destination_country_names,
+                    verify_source_urls=True,
                 )
+
+                if verified_parsed_response != parsed_response:
+                    parsed_response = verified_parsed_response
+
+                    write_json(
+                        path=cache_path,
+                        payload={
+                            "origin_country_slug": origin_country_slug,
+                            "origin_country": origin_country_name,
+                            "destination_countries": destination_country_names,
+                            "raw_text": raw_text,
+                            "parsed_response": parsed_response,
+                        },
+                    )
 
                 result = OutboundMedicalTravelBatchResult(
                     origin_country=origin_country_name,
@@ -521,6 +541,7 @@ def fetch_ai_outbound_estimate_results(
                     origin_country=origin_country_name,
                     destination_countries=destination_country_names,
                     gemini_api_key=gemini_api_key,
+                    verify_source_urls=True,
                 )
 
                 write_json(
