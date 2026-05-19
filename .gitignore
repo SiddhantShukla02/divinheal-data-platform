@@ -30,6 +30,7 @@ data/local/*.sqlite3
 data/raw/*
 data/normalized/*
 data/errors/*
+data/cache
 
 # Keep data folders
 !data/raw/.gitkeep
@@ -49,3 +50,6 @@ Thumbs.db
 # Generated human-facing outputs
 outputs/*
 !outputs/.gitkeep
+
+# Custom scripts 
+scripts/

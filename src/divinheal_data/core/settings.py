@@ -12,6 +12,7 @@
 #   - Loads .env values using python-dotenv.
 #   - Reads known settings with safe local defaults.
 #   - Converts numeric settings to integers.
+#   - Converts boolean feature flags from strings.
 #   - Exposes settings through a typed AppSettings dataclass.
 #
 # OUTPUT:
@@ -39,6 +40,10 @@ class AppSettings:
     database_url: str
     http_timeout_seconds: int
     http_max_retries: int
+    enable_ai_outbound_estimates: bool
+    ai_outbound_estimate_max_origins: int
+    ai_outbound_estimate_refresh_cache: bool
+    gemini_api_key: str | None = None
     r2_account_id: str | None = None
     r2_access_key_id: str | None = None
     r2_secret_access_key: str | None = None
@@ -51,6 +56,27 @@ def _optional_env(name: str) -> str | None:
 
     value = getenv(name)
     return value if value else None
+
+
+def _bool_env(name: str, default: bool = False) -> bool:
+    """Return a boolean environment value from common true/false strings."""
+
+    value = getenv(name)
+
+    if value is None:
+        return default
+
+    normalized_value = value.strip().lower()
+
+    if normalized_value in {"1", "true", "yes", "y", "on"}:
+        return True
+
+    if normalized_value in {"0", "false", "no", "n", "off"}:
+        return False
+
+    raise ValueError(
+        f"{name} must be a boolean value like true/false, yes/no, or 1/0."
+    )
 
 
 def load_settings() -> AppSettings:
@@ -68,6 +94,18 @@ def load_settings() -> AppSettings:
         ),
         http_timeout_seconds=int(getenv("HTTP_TIMEOUT_SECONDS", "30")),
         http_max_retries=int(getenv("HTTP_MAX_RETRIES", "3")),
+        enable_ai_outbound_estimates=_bool_env(
+            "ENABLE_AI_OUTBOUND_ESTIMATES",
+            default=False,
+        ),
+        ai_outbound_estimate_max_origins=int(
+            getenv("AI_OUTBOUND_ESTIMATE_MAX_ORIGINS", "8")
+        ),
+        ai_outbound_estimate_refresh_cache=_bool_env(
+            "AI_OUTBOUND_ESTIMATE_REFRESH_CACHE",
+            default=False,
+        ),
+        gemini_api_key=_optional_env("GEMINI_API_KEY"),
         r2_account_id=_optional_env("R2_ACCOUNT_ID"),
         r2_access_key_id=_optional_env("R2_ACCESS_KEY_ID"),
         r2_secret_access_key=_optional_env("R2_SECRET_ACCESS_KEY"),

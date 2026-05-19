@@ -53,6 +53,12 @@ from openpyxl.utils import get_column_letter
 from divinheal_data.core.run_context import RunContext
 from divinheal_data.core.settings import load_settings
 from divinheal_data.core.statuses import RecordStatus
+from divinheal_data.sources.ai_outbound_medical_travel import (
+    OutboundMedicalTravelBatchResult,
+    OutboundMedicalTravelEstimate,
+    get_outbound_medical_travel_estimates_for_origin,
+    validate_batch_response,
+)
 from divinheal_data.sources.exchange_rates import ExchangeRateResult, get_exchange_rates_for_currency
 from divinheal_data.sources.world_bank_population import PopulationResult, get_population_for_country
 
@@ -68,6 +74,7 @@ DESTINATIONS_CONFIG_PATH = PROJECT_ROOT / "configs/destinations.yml"
 TARGET_SCHEMA_PATH = PROJECT_ROOT / "schemas/target/patient_country_destination_profiles.csv"
 
 RAW_DATA_ROOT = PROJECT_ROOT / "data/raw/patient_country_destination_profiles"
+AI_OUTBOUND_ESTIMATE_CACHE_ROOT = PROJECT_ROOT / "data/cache/ai_outbound_medical_travel"
 OUTPUT_ROOT = PROJECT_ROOT / "outputs/patient_country_destination_profiles"
 LATEST_OUTPUT_DIR = OUTPUT_ROOT / "latest"
 
@@ -225,6 +232,13 @@ def write_json(path: Path, payload: Any) -> None:
         json.dump(payload, file, indent=2, ensure_ascii=False)
 
 
+def read_json(path: Path) -> Any:
+    """Read JSON data from disk."""
+
+    with path.open("r", encoding="utf-8") as file:
+        return json.load(file)
+
+
 # -----------------------------------------------------------------------------
 # REPORT BUILDERS
 # -----------------------------------------------------------------------------
@@ -279,6 +293,14 @@ def build_exchange_rate_raw_path(context: RunContext, origin_currency_code: str)
     return RAW_DATA_ROOT / context.run_id / "exchange_rates" / f"{safe_currency_code}.json"
 
 
+def build_ai_outbound_estimate_cache_path(origin_country_slug: str) -> Path:
+    """Build the cache path for one origin country's AI outbound estimate response."""
+
+    safe_origin_slug = origin_country_slug.strip().lower().replace(" ", "_")
+
+    return AI_OUTBOUND_ESTIMATE_CACHE_ROOT / f"{safe_origin_slug}.json"
+
+
 # -----------------------------------------------------------------------------
 # EXCHANGE-RATE TARGET HELPERS
 # -----------------------------------------------------------------------------
@@ -295,6 +317,21 @@ def get_destination_currency_codes(destinations: list[dict[str, str]]) -> list[s
             currency_codes.add(currency_code)
 
     return sorted(currency_codes)
+
+
+def get_destination_country_names(destinations: list[dict[str, str]]) -> list[str]:
+    """Return destination country names in config order."""
+
+    destination_country_names = []
+
+    for destination in destinations:
+        destination_country_name = destination.get("destination_country_name", "").strip()
+
+        if destination_country_name:
+            destination_country_names.append(destination_country_name)
+
+    return destination_country_names
+
 
 # -----------------------------------------------------------------------------
 # SOURCE ENRICHMENT FETCHERS
@@ -407,6 +444,126 @@ def fetch_exchange_rate_results(
     return exchange_rates_by_currency_code, failures
 
 
+def fetch_ai_outbound_estimate_results(
+    origins: list[dict[str, str]],
+    destinations: list[dict[str, str]],
+    gemini_api_key: str | None,
+    max_origins: int,
+    refresh_cache: bool,
+) -> tuple[dict[str, OutboundMedicalTravelBatchResult], list[dict[str, str]]]:
+    """Fetch or load AI-assisted outbound medical travel estimates."""
+
+    ai_results_by_origin_slug: dict[str, OutboundMedicalTravelBatchResult] = {}
+    failures: list[dict[str, str]] = []
+    destination_country_names = get_destination_country_names(destinations)
+
+    if not gemini_api_key:
+        return (
+            {},
+            [
+                {
+                    "failure_reason": (
+                        "GEMINI_API_KEY is missing while AI outbound estimates are enabled."
+                    ),
+                }
+            ],
+        )
+
+    origins_to_process = origins[:max_origins] if max_origins > 0 else []
+
+    for origin in origins_to_process:
+        origin_country_slug = origin.get("origin_country_slug", "").strip()
+        origin_country_name = origin.get("origin_country_name", "").strip()
+
+        if not origin_country_slug or not origin_country_name:
+            failures.append(
+                {
+                    "origin_country_slug": origin_country_slug,
+                    "origin_country_name": origin_country_name,
+                    "failure_reason": "Missing origin country slug or name.",
+                }
+            )
+            continue
+
+        cache_path = build_ai_outbound_estimate_cache_path(origin_country_slug)
+
+        try:
+            if cache_path.exists() and not refresh_cache:
+                print(
+                    f"[AI outbound estimates] Using cached Gemini response for "
+                    f"{origin_country_name} ({origin_country_slug})."
+                )
+
+                cached_payload = read_json(cache_path)
+                parsed_response = cached_payload.get("parsed_response", {})
+                raw_text = cached_payload.get("raw_text", "")
+
+                estimates = validate_batch_response(
+                    parsed_response=parsed_response,
+                    expected_origin_country=origin_country_name,
+                    expected_destination_countries=destination_country_names,
+                )
+
+                result = OutboundMedicalTravelBatchResult(
+                    origin_country=origin_country_name,
+                    results=estimates,
+                    raw_text=raw_text,
+                    parsed_response=parsed_response,
+                )
+            else:
+                print(
+                    f"[AI outbound estimates] Calling Gemini for "
+                    f"{origin_country_name} ({origin_country_slug}) "
+                    f"against {len(destination_country_names)} destinations."
+                )
+
+                result = get_outbound_medical_travel_estimates_for_origin(
+                    origin_country=origin_country_name,
+                    destination_countries=destination_country_names,
+                    gemini_api_key=gemini_api_key,
+                )
+
+                write_json(
+                    path=cache_path,
+                    payload={
+                        "origin_country_slug": origin_country_slug,
+                        "origin_country": origin_country_name,
+                        "destination_countries": destination_country_names,
+                        "raw_text": result.raw_text,
+                        "parsed_response": result.parsed_response,
+                    },
+                )
+
+                print(
+                    f"[AI outbound estimates] Cached Gemini response for "
+                    f"{origin_country_name} at {cache_path.relative_to(PROJECT_ROOT)}."
+                )
+        except Exception as exc:
+            failures.append(
+                {
+                    "origin_country_slug": origin_country_slug,
+                    "origin_country_name": origin_country_name,
+                    "failure_reason": str(exc),
+                }
+            )
+            continue
+
+        ai_results_by_origin_slug[origin_country_slug] = result
+
+        fillable_result_count = sum(
+            1 for estimate in result.results if is_fillable_ai_outbound_estimate(estimate)
+        )
+        insufficient_result_count = len(result.results) - fillable_result_count
+
+        print(
+            f"[AI outbound estimates] Validated {origin_country_name}: "
+            f"{fillable_result_count} fillable, "
+            f"{insufficient_result_count} insufficient/blank."
+        )
+
+    return ai_results_by_origin_slug, failures
+    
+    
 # -----------------------------------------------------------------------------
 # SOURCE VALUE BUILDERS
 # -----------------------------------------------------------------------------
@@ -457,6 +614,40 @@ def get_exchange_rate_for_target(
     return str(rate)
 
 
+def get_ai_outbound_estimate_for_destination(
+    ai_batch_result: OutboundMedicalTravelBatchResult | None,
+    destination_country_name: str,
+) -> OutboundMedicalTravelEstimate | None:
+    """Return an AI outbound estimate for one destination country."""
+
+    if ai_batch_result is None:
+        return None
+
+    normalized_destination_name = destination_country_name.strip()
+
+    for estimate in ai_batch_result.results:
+        if estimate.destination_country == normalized_destination_name:
+            return estimate
+
+    return None
+
+
+def is_fillable_ai_outbound_estimate(
+    estimate: OutboundMedicalTravelEstimate | None,
+) -> bool:
+    """Return whether an AI outbound estimate is source-backed and fillable."""
+
+    if estimate is None:
+        return False
+
+    return (
+        estimate.status == "needs_review"
+        and estimate.estimate_type != "insufficient_evidence"
+        and bool(estimate.estimated_annual_outbound_medical_travel)
+        and bool(estimate.source_outbound_stats)
+    )
+
+
 # -----------------------------------------------------------------------------
 # FIELD STATUS BUILDERS
 # -----------------------------------------------------------------------------
@@ -465,6 +656,7 @@ def build_missing_fields(
     population_result: PopulationResult | None,
     exchange_rate_result: ExchangeRateResult | None,
     destination_currency_code: str,
+    ai_outbound_estimate: OutboundMedicalTravelEstimate | None = None,
 ) -> list[str]:
     """Build the missing field list for one output row."""
 
@@ -490,6 +682,17 @@ def build_missing_fields(
 
         missing_fields = [field for field in missing_fields if field not in exchange_rate_fields]
 
+    if is_fillable_ai_outbound_estimate(ai_outbound_estimate):
+        ai_fields = {
+            "estimated_annual_outbound_medical_travel",
+            "source_outbound_stats",
+        }
+
+        if ai_outbound_estimate and ai_outbound_estimate.estimated_share_to_destination_pct:
+            ai_fields.add("estimated_share_to_destination_pct")
+
+        missing_fields = [field for field in missing_fields if field not in ai_fields]
+
     return missing_fields
 
 
@@ -497,6 +700,7 @@ def build_filled_fields(
     population_result: PopulationResult | None,
     exchange_rate_result: ExchangeRateResult | None,
     destination_currency_code: str,
+    ai_outbound_estimate: OutboundMedicalTravelEstimate | None = None,
 ) -> list[str]:
     """Build the filled field list for one output row."""
 
@@ -517,7 +721,39 @@ def build_filled_fields(
         if destination_currency_code.strip().upper() in exchange_rate_result.target_rates:
             fields.append("origin_currency_to_destination_currency")
 
+    if is_fillable_ai_outbound_estimate(ai_outbound_estimate):
+        fields.extend(
+            [
+                "estimated_annual_outbound_medical_travel",
+                "source_outbound_stats",
+            ]
+        )
+
+        if ai_outbound_estimate and ai_outbound_estimate.estimated_share_to_destination_pct:
+            fields.append("estimated_share_to_destination_pct")
+
     return fields
+
+
+def build_confidence_score(
+    population_result: PopulationResult | None,
+    exchange_rate_result: ExchangeRateResult | None,
+    ai_outbound_estimate: OutboundMedicalTravelEstimate | None = None,
+) -> str:
+    """Build a simple confidence score based on available enrichment sources."""
+
+    score = 0.20
+
+    if population_result is not None:
+        score += 0.15
+
+    if exchange_rate_result is not None:
+        score += 0.15
+
+    if is_fillable_ai_outbound_estimate(ai_outbound_estimate):
+        score += 0.10
+
+    return f"{score:.2f}"
 
 
 # -----------------------------------------------------------------------------
@@ -530,11 +766,18 @@ def build_profile_row(
     target_columns: list[str],
     population_by_country_code: dict[str, PopulationResult] | None = None,
     exchange_rates_by_currency_code: dict[str, ExchangeRateResult] | None = None,
+    ai_outbound_estimates_by_origin_slug: dict[
+        str,
+        OutboundMedicalTravelBatchResult,
+    ]
+    | None = None,
 ) -> dict[str, str]:
     """Build one origin country and destination country profile row."""
 
     country_code = origin.get("origin_iso_country_code", "").strip().upper()
+    origin_country_slug = origin.get("origin_country_slug", "").strip()
     origin_currency_code = origin.get("origin_currency_code", "").strip().upper()
+    destination_country_name = destination.get("destination_country_name", "").strip()
     destination_currency_code = destination.get("destination_currency_code", "").strip().upper()
 
     population_result = None
@@ -545,15 +788,27 @@ def build_profile_row(
     if exchange_rates_by_currency_code is not None:
         exchange_rate_result = exchange_rates_by_currency_code.get(origin_currency_code)
 
+    ai_batch_result = None
+    if ai_outbound_estimates_by_origin_slug is not None:
+        ai_batch_result = ai_outbound_estimates_by_origin_slug.get(origin_country_slug)
+
+    ai_outbound_estimate = get_ai_outbound_estimate_for_destination(
+        ai_batch_result=ai_batch_result,
+        destination_country_name=destination_country_name,
+    )
+    has_ai_estimate = is_fillable_ai_outbound_estimate(ai_outbound_estimate)
+
     missing_fields = build_missing_fields(
         population_result=population_result,
         exchange_rate_result=exchange_rate_result,
         destination_currency_code=destination_currency_code,
+        ai_outbound_estimate=ai_outbound_estimate,
     )
     filled_fields = build_filled_fields(
         population_result=population_result,
         exchange_rate_result=exchange_rate_result,
         destination_currency_code=destination_currency_code,
+        ai_outbound_estimate=ai_outbound_estimate,
     )
 
     row = {
@@ -585,8 +840,16 @@ def build_profile_row(
         "destination_country_name": destination.get("destination_country_name", ""),
         "destination_region": destination.get("destination_region", ""),
         "destination_currency_code": destination.get("destination_currency_code", ""),
-        "estimated_annual_outbound_medical_travel": "",
-        "estimated_share_to_destination_pct": "",
+        "estimated_annual_outbound_medical_travel": (
+            ai_outbound_estimate.estimated_annual_outbound_medical_travel
+            if has_ai_estimate and ai_outbound_estimate
+            else ""
+        ),
+        "estimated_share_to_destination_pct": (
+            ai_outbound_estimate.estimated_share_to_destination_pct
+            if has_ai_estimate and ai_outbound_estimate
+            else ""
+        ),
         "top_treatments_sought": "",
         "top_origin_cities": "",
         "destination_arrival_cities": "",
@@ -595,19 +858,23 @@ def build_profile_row(
         "embassy_or_consulate_info": "",
         "source_population": build_source_population_value(population_result),
         "source_fx": build_source_fx_value(exchange_rate_result),
-        "source_outbound_stats": "",
+        "source_outbound_stats": (
+            ai_outbound_estimate.source_outbound_stats
+            if has_ai_estimate and ai_outbound_estimate
+            else ""
+        ),
         "verified_date": "",
         "verified_by": "",
         "record_status": (
             RecordStatus.NEEDS_REVIEW.value
-            if population_result or exchange_rate_result
+            if population_result or exchange_rate_result or has_ai_estimate
             else RecordStatus.MISSING_SOURCE.value
         ),
-        "confidence_score": "0.50"
-        if population_result and exchange_rate_result
-        else "0.35"
-        if population_result or exchange_rate_result
-        else "0.20",
+        "confidence_score": build_confidence_score(
+            population_result=population_result,
+            exchange_rate_result=exchange_rate_result,
+            ai_outbound_estimate=ai_outbound_estimate,
+        ),
         "filled_fields": ";".join(filled_fields),
         "missing_fields": ";".join(missing_fields),
         "needs_review_fields": ";".join(missing_fields),
@@ -622,6 +889,11 @@ def build_profiles(
     target_columns: list[str],
     population_by_country_code: dict[str, PopulationResult] | None = None,
     exchange_rates_by_currency_code: dict[str, ExchangeRateResult] | None = None,
+    ai_outbound_estimates_by_origin_slug: dict[
+        str,
+        OutboundMedicalTravelBatchResult,
+    ]
+    | None = None,
 ) -> list[dict[str, str]]:
     """Build all origin country and destination country profile rows."""
 
@@ -636,6 +908,7 @@ def build_profiles(
                     target_columns=target_columns,
                     population_by_country_code=population_by_country_code,
                     exchange_rates_by_currency_code=exchange_rates_by_currency_code,
+                    ai_outbound_estimates_by_origin_slug=ai_outbound_estimates_by_origin_slug,
                 )
             )
 
@@ -643,7 +916,7 @@ def build_profiles(
 
 
 # -----------------------------------------------------------------------------
-# ROW BUILDERS
+# PIPELINE ORCHESTRATION
 # -----------------------------------------------------------------------------
 
 def run_pipeline() -> dict[str, Any]:
@@ -668,12 +941,28 @@ def run_pipeline() -> dict[str, Any]:
         timeout_seconds=settings.http_timeout_seconds,
     )
 
+    ai_outbound_estimates_by_origin_slug: dict[str, OutboundMedicalTravelBatchResult] = {}
+    ai_outbound_estimate_failures: list[dict[str, str]] = []
+
+    if settings.enable_ai_outbound_estimates:
+        (
+            ai_outbound_estimates_by_origin_slug,
+            ai_outbound_estimate_failures,
+        ) = fetch_ai_outbound_estimate_results(
+            origins=origins,
+            destinations=destinations,
+            gemini_api_key=settings.gemini_api_key,
+            max_origins=settings.ai_outbound_estimate_max_origins,
+            refresh_cache=settings.ai_outbound_estimate_refresh_cache,
+        )
+
     rows = build_profiles(
         origins=origins,
         destinations=destinations,
         target_columns=target_columns,
         population_by_country_code=population_by_country_code,
         exchange_rates_by_currency_code=exchange_rates_by_currency_code,
+        ai_outbound_estimates_by_origin_slug=ai_outbound_estimates_by_origin_slug,
     )
 
     output_csv_path = LATEST_OUTPUT_DIR / "patient_country_destination_profiles.csv"
@@ -714,6 +1003,13 @@ def run_pipeline() -> dict[str, Any]:
         "exchange_rate_enriched_currency_count": len(exchange_rates_by_currency_code),
         "exchange_rate_failed_currency_count": len(exchange_rate_failures),
         "exchange_rate_failures": exchange_rate_failures,
+        "ai_outbound_estimates_enabled": settings.enable_ai_outbound_estimates,
+        "ai_outbound_estimate_origin_count": len(ai_outbound_estimates_by_origin_slug),
+        "ai_outbound_estimate_failed_origin_count": len(ai_outbound_estimate_failures),
+        "ai_outbound_estimate_failures": ai_outbound_estimate_failures,
+        "ai_outbound_estimate_cache_dir": str(
+            AI_OUTBOUND_ESTIMATE_CACHE_ROOT.relative_to(PROJECT_ROOT)
+        ),
         "output_csv_path": str(output_csv_path.relative_to(PROJECT_ROOT)),
         "output_xlsx_path": str(output_xlsx_path.relative_to(PROJECT_ROOT)),
         "missing_fields_report_path": str(missing_fields_report_path.relative_to(PROJECT_ROOT)),
@@ -730,6 +1026,7 @@ def run_pipeline() -> dict[str, Any]:
             "Filled config identity fields.",
             "Enriched origin population using World Bank SP.POP.TOTL where available.",
             "Enriched exchange rates using open.er-api.com where available.",
+            "AI outbound medical travel estimates are optional and require source-backed validation.",
             "Other source-backed enrichments are intentionally not included in this slice.",
             "Missing fields are explicitly listed per row.",
         ],

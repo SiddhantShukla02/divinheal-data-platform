@@ -10,19 +10,20 @@
 # PROCESS:
 #   - Tests target schema reading.
 #   - Tests YAML list reading.
-#   - Tests raw source path generation.
+#   - Tests raw/cache source path generation.
 #   - Tests matrix rows without source enrichment.
 #   - Tests matrix rows with population enrichment.
 #   - Tests matrix rows with exchange-rate enrichment.
-#   - Tests CSV and JSON writing helpers.
+#   - Tests matrix rows with AI outbound estimate enrichment.
+#   - Tests CSV, JSON, and XLSX writing helpers.
 #
 # OUTPUT:
-#   Passing tests for the matrix-generation, population-enrichment, and
-#   exchange-rate-enrichment pipeline slice.
+#   Passing tests for the matrix-generation, population-enrichment,
+#   exchange-rate-enrichment, and AI-outbound-estimate pipeline slice.
 #
 # NOTES:
 #   - These tests do not fetch online data.
-#   - These tests do not depend on live World Bank or exchange-rate responses.
+#   - These tests do not call Gemini.
 #   - Source adapter tests separately verify parsing behavior.
 # -----------------------------------------------------------------------------
 
@@ -38,18 +39,25 @@ from divinheal_data.core.statuses import RecordStatus
 from divinheal_data.pipelines.patient_country_destination_profiles import (
     SOURCE_REQUIRED_FIELDS,
     ExchangeRateResult,
+    OutboundMedicalTravelBatchResult,
+    OutboundMedicalTravelEstimate,
     PopulationResult,
+    build_ai_outbound_estimate_cache_path,
+    build_confidence_score,
     build_exchange_rate_raw_path,
     build_filled_fields,
     build_missing_fields,
+    build_missing_fields_report,
     build_population_raw_path,
     build_profile_row,
-    build_missing_fields_report,
     build_profiles,
     build_source_fx_value,
     build_source_population_value,
+    get_ai_outbound_estimate_for_destination,
+    get_destination_country_names,
     get_destination_currency_codes,
     get_exchange_rate_for_target,
+    is_fillable_ai_outbound_estimate,
     read_target_columns,
     read_yaml_list,
     write_csv,
@@ -132,6 +140,74 @@ def make_exchange_rate_result(base_currency: str = "BDT") -> ExchangeRateResult:
     )
 
 
+def make_ai_outbound_estimate(
+    destination_country: str = "India",
+    estimate_type: str = "range",
+    status: str = "needs_review",
+    confidence: str = "low",
+    estimated_annual_outbound_medical_travel: str = "100000-300000",
+    estimated_share_to_destination_pct: str = "",
+    source_outbound_stats: str = (
+        "Candidate estimate based on source-backed reported medical travel evidence."
+    ),
+    sources: list[dict[str, str]] | None = None,
+) -> OutboundMedicalTravelEstimate:
+    if sources is None:
+        sources = [
+            {
+                "source_name": "Example News Source",
+                "source_url": "https://example.com/medical-travel",
+                "evidence_summary": "Reported origin-to-destination medical travel evidence.",
+                "reported_number_or_claim": "Reported directional medical patient flow.",
+            }
+        ]
+
+    return OutboundMedicalTravelEstimate(
+        destination_country=destination_country,
+        estimated_annual_outbound_medical_travel=estimated_annual_outbound_medical_travel,
+        estimated_share_to_destination_pct=estimated_share_to_destination_pct,
+        estimate_type=estimate_type,
+        estimate_year_or_period="2024-2025",
+        confidence=confidence,
+        status=status,
+        source_outbound_stats=source_outbound_stats,
+        sources=sources,
+        caveats=["Needs human review."],
+    )
+
+
+def make_insufficient_ai_outbound_estimate(
+    destination_country: str = "Thailand",
+) -> OutboundMedicalTravelEstimate:
+    return OutboundMedicalTravelEstimate(
+        destination_country=destination_country,
+        estimated_annual_outbound_medical_travel="",
+        estimated_share_to_destination_pct="",
+        estimate_type="insufficient_evidence",
+        estimate_year_or_period="",
+        confidence="insufficient",
+        status="insufficient_evidence",
+        source_outbound_stats="",
+        sources=[],
+        caveats=["No source-backed annual estimate found."],
+    )
+
+
+def make_ai_batch_result(origin_country: str = "Bangladesh") -> OutboundMedicalTravelBatchResult:
+    return OutboundMedicalTravelBatchResult(
+        origin_country=origin_country,
+        results=[
+            make_ai_outbound_estimate(destination_country="India"),
+            make_insufficient_ai_outbound_estimate(destination_country="Thailand"),
+        ],
+        raw_text='{"origin_country": "Bangladesh", "results": []}',
+        parsed_response={
+            "origin_country": origin_country,
+            "results": [],
+        },
+    )
+
+
 def test_read_target_columns_reads_csv_header(tmp_path: Path) -> None:
     schema_path = tmp_path / "target_schema.csv"
     schema_path.write_text("first_column,second_column,third_column\n", encoding="utf-8")
@@ -209,6 +285,29 @@ def test_build_exchange_rate_raw_path_uses_run_id_and_currency_code() -> None:
     )
 
 
+def test_build_ai_outbound_estimate_cache_path_uses_origin_slug() -> None:
+    path = build_ai_outbound_estimate_cache_path(" Bangladesh ")
+
+    assert path.as_posix().endswith(
+        "data/cache/ai_outbound_medical_travel/bangladesh.json"
+    )
+
+
+def test_get_destination_country_names_returns_names_in_config_order() -> None:
+    destinations = [
+        {"destination_country_name": "India"},
+        {"destination_country_name": "Thailand"},
+        {"destination_country_name": ""},
+        {"destination_country_name": "South Korea"},
+    ]
+
+    assert get_destination_country_names(destinations) == [
+        "India",
+        "Thailand",
+        "South Korea",
+    ]
+
+
 def test_get_destination_currency_codes_includes_unique_destinations_and_usd() -> None:
     destinations = [
         {"destination_currency_code": "INR"},
@@ -267,7 +366,43 @@ def test_get_exchange_rate_for_target_returns_rate_as_string() -> None:
     assert get_exchange_rate_for_target(exchange_rate_result, " inr ") == "0.780658"
 
 
-def test_build_missing_fields_keeps_population_and_fx_fields_without_results() -> None:
+def test_get_ai_outbound_estimate_for_destination_returns_matching_result() -> None:
+    ai_batch_result = make_ai_batch_result()
+
+    estimate = get_ai_outbound_estimate_for_destination(
+        ai_batch_result=ai_batch_result,
+        destination_country_name="India",
+    )
+
+    assert estimate is not None
+    assert estimate.destination_country == "India"
+    assert estimate.estimated_annual_outbound_medical_travel == "100000-300000"
+
+
+def test_get_ai_outbound_estimate_for_destination_returns_none_when_missing() -> None:
+    ai_batch_result = make_ai_batch_result()
+
+    estimate = get_ai_outbound_estimate_for_destination(
+        ai_batch_result=ai_batch_result,
+        destination_country_name="Malaysia",
+    )
+
+    assert estimate is None
+
+
+def test_is_fillable_ai_outbound_estimate_accepts_source_backed_estimate() -> None:
+    estimate = make_ai_outbound_estimate()
+
+    assert is_fillable_ai_outbound_estimate(estimate) is True
+
+
+def test_is_fillable_ai_outbound_estimate_rejects_insufficient_evidence() -> None:
+    estimate = make_insufficient_ai_outbound_estimate()
+
+    assert is_fillable_ai_outbound_estimate(estimate) is False
+
+
+def test_build_missing_fields_keeps_population_fx_and_ai_fields_without_results() -> None:
     missing_fields = build_missing_fields(
         population_result=None,
         exchange_rate_result=None,
@@ -281,6 +416,9 @@ def test_build_missing_fields_keeps_population_and_fx_fields_without_results() -
     assert "origin_currency_to_destination_currency" in missing_fields
     assert "exchange_rate_date" in missing_fields
     assert "source_fx" in missing_fields
+    assert "estimated_annual_outbound_medical_travel" in missing_fields
+    assert "estimated_share_to_destination_pct" in missing_fields
+    assert "source_outbound_stats" in missing_fields
 
 
 def test_build_missing_fields_removes_population_fields_when_population_exists() -> None:
@@ -315,6 +453,57 @@ def test_build_missing_fields_removes_fx_fields_when_fx_exists() -> None:
     assert "origin_population_millions" in missing_fields
 
 
+def test_build_missing_fields_removes_ai_outbound_fields_when_fillable_ai_exists() -> None:
+    ai_estimate = make_ai_outbound_estimate(
+        estimated_share_to_destination_pct="20%-30%",
+    )
+
+    missing_fields = build_missing_fields(
+        population_result=None,
+        exchange_rate_result=None,
+        destination_currency_code="INR",
+        ai_outbound_estimate=ai_estimate,
+    )
+
+    assert "estimated_annual_outbound_medical_travel" not in missing_fields
+    assert "estimated_share_to_destination_pct" not in missing_fields
+    assert "source_outbound_stats" not in missing_fields
+    assert "origin_population_millions" in missing_fields
+    assert "source_population" in missing_fields
+
+
+def test_build_missing_fields_keeps_ai_share_missing_when_share_is_blank() -> None:
+    ai_estimate = make_ai_outbound_estimate(
+        estimated_share_to_destination_pct="",
+    )
+
+    missing_fields = build_missing_fields(
+        population_result=None,
+        exchange_rate_result=None,
+        destination_currency_code="INR",
+        ai_outbound_estimate=ai_estimate,
+    )
+
+    assert "estimated_annual_outbound_medical_travel" not in missing_fields
+    assert "estimated_share_to_destination_pct" in missing_fields
+    assert "source_outbound_stats" not in missing_fields
+
+
+def test_build_missing_fields_keeps_ai_fields_when_ai_is_insufficient() -> None:
+    ai_estimate = make_insufficient_ai_outbound_estimate(destination_country="India")
+
+    missing_fields = build_missing_fields(
+        population_result=None,
+        exchange_rate_result=None,
+        destination_currency_code="INR",
+        ai_outbound_estimate=ai_estimate,
+    )
+
+    assert "estimated_annual_outbound_medical_travel" in missing_fields
+    assert "estimated_share_to_destination_pct" in missing_fields
+    assert "source_outbound_stats" in missing_fields
+
+
 def test_build_filled_fields_adds_population_fields_when_population_exists() -> None:
     population_result = make_population_result()
 
@@ -346,6 +535,55 @@ def test_build_filled_fields_adds_fx_fields_when_fx_exists() -> None:
     assert "exchange_rate_date" in filled_fields
     assert "source_fx" in filled_fields
     assert "origin_population_millions" not in filled_fields
+
+
+def test_build_filled_fields_adds_ai_fields_when_fillable_ai_exists() -> None:
+    ai_estimate = make_ai_outbound_estimate(
+        estimated_share_to_destination_pct="20%-30%",
+    )
+
+    filled_fields = build_filled_fields(
+        population_result=None,
+        exchange_rate_result=None,
+        destination_currency_code="INR",
+        ai_outbound_estimate=ai_estimate,
+    )
+
+    assert "estimated_annual_outbound_medical_travel" in filled_fields
+    assert "estimated_share_to_destination_pct" in filled_fields
+    assert "source_outbound_stats" in filled_fields
+    assert "origin_population_millions" not in filled_fields
+
+
+def test_build_filled_fields_skips_ai_share_when_share_is_blank() -> None:
+    ai_estimate = make_ai_outbound_estimate(
+        estimated_share_to_destination_pct="",
+    )
+
+    filled_fields = build_filled_fields(
+        population_result=None,
+        exchange_rate_result=None,
+        destination_currency_code="INR",
+        ai_outbound_estimate=ai_estimate,
+    )
+
+    assert "estimated_annual_outbound_medical_travel" in filled_fields
+    assert "estimated_share_to_destination_pct" not in filled_fields
+    assert "source_outbound_stats" in filled_fields
+
+
+def test_build_confidence_score_increases_with_population_fx_and_ai() -> None:
+    population_result = make_population_result()
+    exchange_rate_result = make_exchange_rate_result()
+    ai_estimate = make_ai_outbound_estimate()
+
+    confidence_score = build_confidence_score(
+        population_result=population_result,
+        exchange_rate_result=exchange_rate_result,
+        ai_outbound_estimate=ai_estimate,
+    )
+
+    assert confidence_score == "0.60"
 
 
 def test_build_profile_row_without_enrichment_marks_source_fields_missing() -> None:
@@ -390,8 +628,11 @@ def test_build_profile_row_without_enrichment_marks_source_fields_missing() -> N
     assert row["exchange_rate_date"] == ""
     assert row["origin_population_millions"] == ""
     assert row["origin_population_year"] == ""
+    assert row["estimated_annual_outbound_medical_travel"] == ""
+    assert row["estimated_share_to_destination_pct"] == ""
     assert row["source_population"] == ""
     assert row["source_fx"] == ""
+    assert row["source_outbound_stats"] == ""
     assert row["embassy_or_consulate_info"] == ""
 
     assert row["record_status"] == RecordStatus.MISSING_SOURCE.value
@@ -464,6 +705,87 @@ def test_build_profile_row_with_population_and_fx_fills_source_fields() -> None:
     assert "origin_currency_to_destination_currency" not in row["missing_fields"]
     assert "exchange_rate_date" not in row["missing_fields"]
     assert "source_fx" not in row["missing_fields"]
+
+
+def test_build_profile_row_with_population_fx_and_ai_fills_outbound_fields() -> None:
+    origin = {
+        "origin_country_slug": "bangladesh",
+        "origin_country_name": "Bangladesh",
+        "origin_country_name_local": "বাংলাদেশ",
+        "origin_iso_country_code": "BD",
+        "origin_primary_locale": "bn",
+        "origin_secondary_locales": "en",
+        "origin_currency_code": "BDT",
+    }
+
+    destination = {
+        "destination_country_slug": "india",
+        "destination_country_name": "India",
+        "destination_region": "South Asia",
+        "destination_currency_code": "INR",
+    }
+
+    population_result = make_population_result(country_iso_code="BD")
+    exchange_rate_result = make_exchange_rate_result(base_currency="BDT")
+    ai_batch_result = make_ai_batch_result(origin_country="Bangladesh")
+
+    row = build_profile_row(
+        origin=origin,
+        destination=destination,
+        target_columns=TARGET_COLUMNS,
+        population_by_country_code={"BD": population_result},
+        exchange_rates_by_currency_code={"BDT": exchange_rate_result},
+        ai_outbound_estimates_by_origin_slug={"bangladesh": ai_batch_result},
+    )
+
+    assert row["estimated_annual_outbound_medical_travel"] == "100000-300000"
+    assert row["estimated_share_to_destination_pct"] == ""
+    assert row["source_outbound_stats"] == (
+        "Candidate estimate based on source-backed reported medical travel evidence."
+    )
+
+    assert row["record_status"] == RecordStatus.NEEDS_REVIEW.value
+    assert row["confidence_score"] == "0.60"
+
+    assert "estimated_annual_outbound_medical_travel" in row["filled_fields"]
+    assert "source_outbound_stats" in row["filled_fields"]
+    assert "estimated_share_to_destination_pct" not in row["filled_fields"]
+
+    assert "estimated_annual_outbound_medical_travel" not in row["missing_fields"]
+    assert "source_outbound_stats" not in row["missing_fields"]
+    assert "estimated_share_to_destination_pct" in row["missing_fields"]
+
+
+def test_build_profile_row_with_insufficient_ai_keeps_outbound_fields_blank() -> None:
+    origin = {
+        "origin_country_slug": "bangladesh",
+        "origin_country_name": "Bangladesh",
+        "origin_iso_country_code": "BD",
+        "origin_currency_code": "BDT",
+    }
+
+    destination = {
+        "destination_country_slug": "thailand",
+        "destination_country_name": "Thailand",
+        "destination_currency_code": "THB",
+    }
+
+    ai_batch_result = make_ai_batch_result(origin_country="Bangladesh")
+
+    row = build_profile_row(
+        origin=origin,
+        destination=destination,
+        target_columns=TARGET_COLUMNS,
+        ai_outbound_estimates_by_origin_slug={"bangladesh": ai_batch_result},
+    )
+
+    assert row["estimated_annual_outbound_medical_travel"] == ""
+    assert row["estimated_share_to_destination_pct"] == ""
+    assert row["source_outbound_stats"] == ""
+
+    assert "estimated_annual_outbound_medical_travel" in row["missing_fields"]
+    assert "estimated_share_to_destination_pct" in row["missing_fields"]
+    assert "source_outbound_stats" in row["missing_fields"]
 
 
 def test_build_profile_row_matches_target_columns_only() -> None:
@@ -567,6 +889,52 @@ def test_build_profiles_passes_population_and_fx_results_to_rows() -> None:
             "origin_population_year": "2024",
             "origin_currency_to_usd": "0.008146",
             "origin_currency_to_destination_currency": "0.265507",
+        },
+    ]
+
+
+def test_build_profiles_passes_ai_results_to_rows() -> None:
+    origins = [
+        {
+            "origin_country_slug": "bangladesh",
+            "origin_iso_country_code": "BD",
+            "origin_currency_code": "BDT",
+        },
+    ]
+
+    destinations = [
+        {"destination_country_slug": "india", "destination_country_name": "India"},
+        {"destination_country_slug": "thailand", "destination_country_name": "Thailand"},
+    ]
+
+    ai_batch_result = make_ai_batch_result(origin_country="Bangladesh")
+
+    rows = build_profiles(
+        origins=origins,
+        destinations=destinations,
+        target_columns=[
+            "origin_country_slug",
+            "destination_country_slug",
+            "estimated_annual_outbound_medical_travel",
+            "source_outbound_stats",
+        ],
+        ai_outbound_estimates_by_origin_slug={"bangladesh": ai_batch_result},
+    )
+
+    assert rows == [
+        {
+            "origin_country_slug": "bangladesh",
+            "destination_country_slug": "india",
+            "estimated_annual_outbound_medical_travel": "100000-300000",
+            "source_outbound_stats": (
+                "Candidate estimate based on source-backed reported medical travel evidence."
+            ),
+        },
+        {
+            "origin_country_slug": "bangladesh",
+            "destination_country_slug": "thailand",
+            "estimated_annual_outbound_medical_travel": "",
+            "source_outbound_stats": "",
         },
     ]
 

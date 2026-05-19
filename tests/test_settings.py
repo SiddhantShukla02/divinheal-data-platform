@@ -20,6 +20,8 @@
 #   - They only validate config-loading behavior.
 # -----------------------------------------------------------------------------
 
+import pytest
+
 from divinheal_data.core.settings import load_settings
 
 
@@ -36,11 +38,19 @@ def test_load_settings_uses_local_defaults(monkeypatch) -> None:
         "R2_SECRET_ACCESS_KEY",
         "R2_BUCKET_NAME",
         "R2_ENDPOINT_URL",
+        "ENABLE_AI_OUTBOUND_ESTIMATES",
+        "AI_OUTBOUND_ESTIMATE_MAX_ORIGINS",
+        "AI_OUTBOUND_ESTIMATE_REFRESH_CACHE",
+        "GEMINI_API_KEY",
     ]
 
     for name in env_names:
         monkeypatch.delenv(name, raising=False)
-
+    monkeypatch.setenv("ENABLE_AI_OUTBOUND_ESTIMATES", "false")
+    monkeypatch.setenv("AI_OUTBOUND_ESTIMATE_MAX_ORIGINS", "8")
+    monkeypatch.setenv("AI_OUTBOUND_ESTIMATE_REFRESH_CACHE", "false")
+    monkeypatch.setenv("GEMINI_API_KEY", "")
+    
     settings = load_settings()
 
     assert settings.app_env == "local"
@@ -52,6 +62,10 @@ def test_load_settings_uses_local_defaults(monkeypatch) -> None:
     )
     assert settings.http_timeout_seconds == 30
     assert settings.http_max_retries == 3
+    assert settings.enable_ai_outbound_estimates is False
+    assert settings.ai_outbound_estimate_max_origins == 8
+    assert settings.ai_outbound_estimate_refresh_cache is False
+    assert settings.gemini_api_key is None
     assert settings.r2_account_id is None
     assert settings.r2_access_key_id is None
     assert settings.r2_secret_access_key is None
@@ -71,6 +85,10 @@ def test_load_settings_uses_environment_overrides(monkeypatch) -> None:
     monkeypatch.setenv("R2_SECRET_ACCESS_KEY", "secret")
     monkeypatch.setenv("R2_BUCKET_NAME", "bucket")
     monkeypatch.setenv("R2_ENDPOINT_URL", "https://example.r2.cloudflarestorage.com")
+    monkeypatch.setenv("ENABLE_AI_OUTBOUND_ESTIMATES", "true")
+    monkeypatch.setenv("AI_OUTBOUND_ESTIMATE_MAX_ORIGINS", "5")
+    monkeypatch.setenv("AI_OUTBOUND_ESTIMATE_REFRESH_CACHE", "yes")
+    monkeypatch.setenv("GEMINI_API_KEY", "fake-test-key")
 
     settings = load_settings()
 
@@ -80,6 +98,10 @@ def test_load_settings_uses_environment_overrides(monkeypatch) -> None:
     assert settings.database_url == "postgresql://user:pass@localhost:5432/test_db"
     assert settings.http_timeout_seconds == 10
     assert settings.http_max_retries == 1
+    assert settings.enable_ai_outbound_estimates is True
+    assert settings.ai_outbound_estimate_max_origins == 5
+    assert settings.ai_outbound_estimate_refresh_cache is True
+    assert settings.gemini_api_key == "fake-test-key"
     assert settings.r2_account_id == "account"
     assert settings.r2_access_key_id == "access"
     assert settings.r2_secret_access_key == "secret"
@@ -101,3 +123,9 @@ def test_blank_optional_r2_values_are_treated_as_missing(monkeypatch) -> None:
     assert settings.r2_secret_access_key is None
     assert settings.r2_bucket_name is None
     assert settings.r2_endpoint_url is None
+
+def test_load_settings_rejects_invalid_boolean_env(monkeypatch) -> None:
+    monkeypatch.setenv("ENABLE_AI_OUTBOUND_ESTIMATES", "maybe")
+
+    with pytest.raises(ValueError, match="ENABLE_AI_OUTBOUND_ESTIMATES must be a boolean"):
+        load_settings()
