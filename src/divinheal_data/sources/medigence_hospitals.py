@@ -33,6 +33,7 @@ import json
 import requests
 import yaml
 import math
+import re
 
 from pathlib import Path
 from typing import Any
@@ -197,45 +198,114 @@ def extract_hospital_location(hospital_card: Any) -> tuple[str, str]:
 
     return city, country
 
-def extract_hospital_address(hospital_card: Any) -> str:
+
+def extract_hospital_address(
+    hospital_card: Any,
+) -> str:
     """Extract raw hospital address from one hospital card."""
 
-    address_meta = hospital_card.select_one('meta[itemprop="address"]')
+    address_element = hospital_card.select_one(
+        'meta[itemprop="address"]'
+    )
 
-    if address_meta is None:
+    if address_element is None:
         return ""
 
-    address = address_meta.get("content", "").strip()
+    address = (
+        address_element.get(
+            "content",
+            "",
+        )
+        .strip()
+    )
 
-    if address == "0":
+    if (
+        not address
+        or address == "0"
+    ):
         return ""
 
     return address
 
-def extract_hospital_data(hospital_card: Any) -> dict[str, str]:
+
+def extract_hospital_data(
+    hospital_card: Any,
+) -> dict[str, Any]:
     """Extract structured hospital discovery data from one hospital card."""
 
-    hospital_name = extract_hospital_name(hospital_card)
+    hospital_name = extract_hospital_name(
+        hospital_card,
+    )
 
-    hospital_url = extract_hospital_url(hospital_card)
+    hospital_url = extract_hospital_url(
+        hospital_card,
+    )
 
-    city, country = extract_hospital_location(hospital_card)
+    city, country = extract_hospital_location(
+        hospital_card,
+    )
 
-    address_raw = extract_hospital_address(hospital_card)
+    address_raw = extract_hospital_address(
+        hospital_card,
+    )
+
+    normalized_city = normalize_city_name(
+        city,
+    )
+
+    normalized_address = (
+        f"{normalized_city}, "
+        f"{country.strip().lower()}"
+    )
+
+    (
+        city_match_status,
+        _,
+        _,
+    ) = get_city_validation_status(
+        city=city,
+        address_raw=address_raw,
+    )
 
     return {
+        "record_id": None,
+
         "hospital_name": hospital_name,
-        "source_url": hospital_url,
-        "city": city,
-        "country": country,
-        "address_raw": address_raw,
-        "source_site": "medigence",
+
+        "location": {
+            "city": city,
+            "country": country,
+            "address_raw": address_raw,
+
+            "normalized_city": normalized_city,
+            "normalized_address": normalized_address,
+        },
+
+        "validation": {
+            "city_match_status": (
+                city_match_status
+            ),
+        },
+
+        "source": {
+            "source_site": "medigence",
+            "source_url": hospital_url,
+        },
     }
+
 
 def is_allowed_country(hospital_data: dict[str, str],allowed_countries: set[str]) -> bool:
     """Check whether a hospital belongs to an allowed destination country."""
 
-    country = hospital_data.get(
+    location = hospital_data.get(
+        "location",
+        {},
+    )
+
+    if not isinstance(location, dict):
+        return False
+
+    country = location.get(
         "country",
         "",
     )
@@ -255,6 +325,127 @@ def is_allowed_country(hospital_data: dict[str, str],allowed_countries: set[str]
         normalized_country
         in normalized_allowed_countries
     )
+
+
+# -----------------------------------------------------------------------------
+# VALIDATION HELPERS
+# -----------------------------------------------------------------------------
+
+CITY_ALIASES = {
+    "bengaluru": [
+        "bangalore",
+        "banglore",
+        "bengaluru",
+    ],
+
+    "gurugram": [
+        "gurgaon",
+        "gurugram",
+    ],
+
+    "kozhikode": [
+        "calicut",
+        "kozhikode",
+    ],
+
+    "mumbai": [
+        "bombay",
+        "mumbai",
+    ],
+
+    "delhi": [
+        "new delhi",
+        "delhi",
+    ],
+}
+
+def normalize_city_name(
+    city_name: str,
+) -> str:
+    """Convert city names into canonical validation names."""
+
+    normalized_city = (
+        city_name.strip()
+        .lower()
+    )
+
+    for canonical_city, aliases in CITY_ALIASES.items():
+        if normalized_city in aliases:
+            return canonical_city
+
+    return normalized_city
+
+
+def address_contains_city_alias(
+    canonical_city: str,
+    address_text: str,
+) -> bool:
+    """Check whether address contains any valid city alias."""
+
+    aliases = CITY_ALIASES.get(
+        canonical_city,
+        [canonical_city],
+    )
+
+    normalized_address = (
+        address_text.strip()
+        .lower()
+    )
+
+    for alias in aliases:
+        alias_pattern = (
+            rf"\b{re.escape(alias)}\b"
+        )
+
+        if re.search(
+            alias_pattern,
+            normalized_address,
+        ):
+            return True
+
+    return False
+
+
+def get_city_validation_status(
+    city: str,
+    address_raw: str,
+) -> tuple[str, str, str]:
+    """Validate whether address contains a valid city alias."""
+
+    canonical_city = normalize_city_name(
+        city,
+    )
+
+    normalized_address = (
+        address_raw.strip()
+        .lower()
+    )
+
+    if not normalized_address:
+        return (
+            "validation_unavailable",
+            canonical_city,
+            normalized_address,
+        )
+
+    city_found = address_contains_city_alias(
+        canonical_city=canonical_city,
+        address_text=normalized_address,
+    )
+
+    if city_found:
+        return (
+            "city_verified",
+            canonical_city,
+            normalized_address,
+        )
+
+    return (
+        "needs_review",
+        canonical_city,
+        normalized_address,
+    )
+
 
 # -----------------------------------------------------------------------------
 # SOURCE FETCHERS
@@ -326,6 +517,20 @@ def main() -> None:
                 continue
 
             hospitals_data.append(hospital_data)
+
+    hospitals_data.sort(
+        key=lambda hospital: (
+            hospital["location"]["country"],
+            hospital["location"]["city"],
+            hospital["hospital_name"],
+        ),
+    )
+
+    for record_id, hospital_data in enumerate(
+        hospitals_data,
+        start=1,
+    ):
+        hospital_data["record_id"] = record_id
 
     output_dir = Path("outputs/raw")
 
