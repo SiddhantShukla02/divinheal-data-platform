@@ -30,11 +30,13 @@ from __future__ import annotations
 # -----------------------------------------------------------------------------
 
 import json
+import requests
+import yaml
+import math
 
 from pathlib import Path
 from typing import Any
 
-import requests
 from bs4 import BeautifulSoup
 
 
@@ -44,6 +46,33 @@ from bs4 import BeautifulSoup
 
 BASE_URL = "https://medigence.com"
 LISTING_ENDPOINT = f"{BASE_URL}/clinics/all"
+
+
+# -----------------------------------------------------------------------------
+# CONFIG HELPERS
+# -----------------------------------------------------------------------------
+
+def load_allowed_countries() -> set[str]:
+    """Load allowed destination countries from config."""
+
+    config_path = Path("configs/hospital_discovery.yml")
+
+    with open(config_path, "r", encoding="utf-8") as config_file:
+        config_data = yaml.safe_load(config_file)
+
+    target_countries = config_data.get(
+        "target_countries",
+        [],
+    )
+
+    allowed_countries = {
+        country.strip().lower()
+        for country in target_countries
+        if country
+    }
+
+    return allowed_countries
+
 
 
 # -----------------------------------------------------------------------------
@@ -69,6 +98,40 @@ def extract_listing_html(payload: dict[str, Any]) -> str:
         return ""
 
     return result
+
+
+def extract_total_pages(payload: dict[str, Any]) -> int:
+    """Extract total listing pages from MediGence payload."""
+
+    body = payload.get("body", {})
+
+    if not isinstance(body, dict):
+        return 1
+
+    message = body.get("message", {})
+
+    if not isinstance(message, dict):
+        return 1
+
+    total_records = message.get("total_records", 0)
+
+    limit = message.get("limit", 15)
+
+    if not isinstance(total_records, int):
+        return 1
+
+    if not isinstance(limit, int):
+        return 1
+
+    if limit <= 0:
+        return 1
+
+    total_pages = math.ceil(
+        total_records / limit
+    )
+
+    return max(total_pages, 1)
+
 
 
 # -----------------------------------------------------------------------------
@@ -144,6 +207,9 @@ def extract_hospital_address(hospital_card: Any) -> str:
 
     address = address_meta.get("content", "").strip()
 
+    if address == "0":
+        return ""
+
     return address
 
 def extract_hospital_data(hospital_card: Any) -> dict[str, str]:
@@ -166,7 +232,29 @@ def extract_hospital_data(hospital_card: Any) -> dict[str, str]:
         "source_site": "medigence",
     }
 
+def is_allowed_country(hospital_data: dict[str, str],allowed_countries: set[str]) -> bool:
+    """Check whether a hospital belongs to an allowed destination country."""
 
+    country = hospital_data.get(
+        "country",
+        "",
+    )
+
+    normalized_country = (
+        country.strip()
+        .lower()
+        .replace("-", " ")
+    )
+
+    normalized_allowed_countries = {
+        allowed_country.replace("-", " ")
+        for allowed_country in allowed_countries
+    }
+
+    return (
+        normalized_country
+        in normalized_allowed_countries
+    )
 
 # -----------------------------------------------------------------------------
 # SOURCE FETCHERS
@@ -197,19 +285,47 @@ def fetch_listing_page(page: int) -> dict[str, Any]:
 
     return payload
 
-if __name__ == "__main__":
+
+# -----------------------------------------------------------------------------
+# MAIN EXECUTION
+# -----------------------------------------------------------------------------
+
+def main() -> None:
+    """Run MediGence hospital discovery extraction."""
+
     payload = fetch_listing_page(page=1)
 
-    html = extract_listing_html(payload)
+    total_pages = extract_total_pages(payload)
 
-    soup = parse_listing_html(html)
+    print(f"Total pages found: {total_pages}")    
 
-    hospital_cards = extract_hospital_cards(soup)
+    allowed_countries = load_allowed_countries()
 
-    hospitals_data = [
-        extract_hospital_data(hospital_card)
-        for hospital_card in hospital_cards
-    ]
+    hospitals_data = []
+
+    for page in range(1, total_pages + 1):
+        print(f"Fetching page {page}/{total_pages}")
+
+        payload = fetch_listing_page(page=page)
+
+        html = extract_listing_html(payload)
+
+        soup = parse_listing_html(html)
+
+        hospital_cards = extract_hospital_cards(soup)
+
+        for hospital_card in hospital_cards:
+            hospital_data = extract_hospital_data(
+                hospital_card,
+            )
+
+            if not is_allowed_country(
+                hospital_data,
+                allowed_countries,
+            ):
+                continue
+
+            hospitals_data.append(hospital_data)
 
     output_dir = Path("outputs/raw")
 
@@ -218,7 +334,7 @@ if __name__ == "__main__":
         exist_ok=True,
     )
 
-    output_path = output_dir / "medigence_hospitals_page_1.json"
+    output_path = output_dir / "medigence_hospitals.json"
 
     with open(output_path, "w", encoding="utf-8") as output_file:
         json.dump(
@@ -229,3 +345,7 @@ if __name__ == "__main__":
         )
 
     print(f"Saved {len(hospitals_data)} hospitals to {output_path}")
+
+
+if __name__ == "__main__":
+    main()
