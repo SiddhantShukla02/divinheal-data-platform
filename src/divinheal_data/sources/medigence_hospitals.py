@@ -228,6 +228,126 @@ def extract_hospital_address(
     return address
 
 
+def extract_bed_count(
+    hospital_card: Any,
+) -> Optional[int]:
+    """Extract hospital bed count."""
+
+    bed_element = hospital_card.find(
+        string=lambda text: (
+            text
+            and "Number of Beds" in text
+        )
+    )
+
+    if bed_element is None:
+        return None
+
+    bed_span = (
+        bed_element.parent.find(
+            "span"
+        )
+    )
+
+    if bed_span is None:
+        return None
+
+    bed_text = (
+        bed_span.get_text(
+            strip=True
+        )
+    )
+
+    digits = "".join(
+        char
+        for char in bed_text
+        if char.isdigit()
+    )
+
+    if not digits:
+        return None
+
+    return int(digits)
+
+
+def extract_year_founded(
+    hospital_card: Any,
+) -> Optional[int]:
+    """Extract hospital founded year."""
+
+    year_element = hospital_card.find(
+        string=lambda text: (
+            text
+            and "Year of Establishment"
+            in text
+        )
+    )
+
+    if year_element is None:
+        return None
+
+    year_span = (
+        year_element.parent.find(
+            "span"
+        )
+    )
+
+    if year_span is None:
+        return None
+
+    year_text = (
+        year_span.get_text(
+            strip=True
+        )
+    )
+
+    digits = "".join(
+        char
+        for char in year_text
+        if char.isdigit()
+    )
+
+    if len(digits) != 4:
+        return None
+
+    return int(digits)
+
+
+def extract_accreditations(
+    hospital_card: Any,
+) -> List[str]:
+    """Extract hospital accreditations."""
+
+    accreditation_meta_tags = (
+        hospital_card.select(
+            'ul.certify_ic meta[itemprop="name"]'
+        )
+    )
+
+    accreditations = []
+
+    for meta_tag in accreditation_meta_tags:
+
+        accreditation_name = (
+            meta_tag.get(
+                "content",
+                ""
+            )
+            .strip()
+        )
+
+        if (
+            accreditation_name
+            and accreditation_name
+            not in accreditations
+        ):
+            accreditations.append(
+                accreditation_name
+            )
+
+    return accreditations
+
+
 def extract_hospital_data(
     hospital_card: Any,
 ) -> dict[str, Any]:
@@ -247,6 +367,18 @@ def extract_hospital_data(
 
     address_raw = extract_hospital_address(
         hospital_card,
+    )
+
+    bed_count = extract_bed_count(
+        hospital_card,
+    )
+
+    year_founded = extract_year_founded(
+            hospital_card,
+    )
+
+    accreditations = extract_accreditations(
+            hospital_card,
     )
 
     normalized_city = normalize_city_name(
@@ -279,6 +411,12 @@ def extract_hospital_data(
 
             "normalized_city": normalized_city,
             "normalized_address": normalized_address,
+        },
+
+        "info": {
+            "bed_count": bed_count,
+            "year_founded": year_founded,
+            "accreditations": accreditations,
         },
 
         "validation": {
@@ -423,7 +561,7 @@ def get_city_validation_status(
 
     if not normalized_address:
         return (
-            "validation_unavailable",
+            "error_missing_address",
             canonical_city,
             normalized_address,
         )
@@ -441,7 +579,7 @@ def get_city_validation_status(
         )
 
     return (
-        "needs_review",
+        "error_city_mismatch",
         canonical_city,
         normalized_address,
     )
@@ -485,6 +623,13 @@ def main() -> None:
     """Run MediGence hospital discovery extraction."""
 
     payload = fetch_listing_page(page=1)
+    print(
+        json.dumps(
+            payload,
+            indent=4,
+            ensure_ascii=False,
+        )[:15000]
+    )
 
     total_pages = extract_total_pages(payload)
 
