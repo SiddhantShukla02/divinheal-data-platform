@@ -36,7 +36,7 @@ import math
 import re
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional, List
 
 from bs4 import BeautifulSoup
 
@@ -374,7 +374,7 @@ def extract_hospital_data(
     )
 
     year_founded = extract_year_founded(
-            hospital_card,
+        hospital_card,
     )
 
     accreditations = extract_accreditations(
@@ -385,7 +385,7 @@ def extract_hospital_data(
         city,
     )
 
-    normalized_address = (
+    normalized_location = (
         f"{normalized_city}, "
         f"{country.strip().lower()}"
     )
@@ -410,7 +410,7 @@ def extract_hospital_data(
             "address_raw": address_raw,
 
             "normalized_city": normalized_city,
-            "normalized_address": normalized_address,
+            "normalized_location": normalized_location,
         },
 
         "info": {
@@ -426,7 +426,6 @@ def extract_hospital_data(
         },
 
         "source": {
-            "source_site": "medigence",
             "source_url": hospital_url,
         },
     }
@@ -615,6 +614,43 @@ def fetch_listing_page(page: int) -> dict[str, Any]:
     return payload
 
 
+# def fetch_hospital_page(
+#     hospital_url: str,
+# ) -> BeautifulSoup:
+#     """Fetch and parse a hospital detail page."""
+
+#     response = requests.get(
+#         hospital_url,
+#         headers={
+#             "User-Agent": (
+#                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+#                 "AppleWebKit/537.36 (KHTML, like Gecko) "
+#                 "Chrome/148.0.0.0 Safari/537.36"
+#             ),
+#         },
+#         timeout=30,
+#     )
+#     print("\nFINAL RESPONSE URL:\n")
+
+#     print(
+#         response.url
+#     )
+
+#     print("\nPAGE TITLE:\n")
+
+#     soup = BeautifulSoup(
+#         response.text,
+#         "lxml",
+#     )
+
+#     print(
+#         soup.title
+#     )
+#     response.raise_for_status()
+
+#     return soup
+
+
 # -----------------------------------------------------------------------------
 # MAIN EXECUTION
 # -----------------------------------------------------------------------------
@@ -632,6 +668,18 @@ def main() -> None:
 
     hospitals_data = []
 
+    output_dir = Path("outputs/raw")
+
+    output_dir.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    output_path = (
+        output_dir
+        / "medigence_hospitals.json"
+    )
+
     for page in range(1, total_pages + 1):
         print(f"Fetching page {page}/{total_pages}")
 
@@ -644,9 +692,28 @@ def main() -> None:
         hospital_cards = extract_hospital_cards(soup)
 
         for hospital_card in hospital_cards:
-            hospital_data = extract_hospital_data(
-                hospital_card,
-            )
+
+            try:
+                hospital_data = extract_hospital_data(
+                    hospital_card,
+                )
+
+            except Exception as error:
+
+                failed_hospital = (
+                    extract_hospital_name(
+                        hospital_card,
+                    )
+                )
+
+                print(
+                    f"Failed hospital: "
+                    f"{failed_hospital}"
+                )
+
+                print(error)
+
+                continue
 
             if not is_allowed_country(
                 hospital_data,
@@ -654,7 +721,29 @@ def main() -> None:
             ):
                 continue
 
-            hospitals_data.append(hospital_data)
+            hospitals_data.append(
+                hospital_data
+            )
+
+            if len(hospitals_data) % 25 == 0:
+
+                with open(
+                    output_path,
+                    "w",
+                    encoding="utf-8",
+                ) as output_file:
+
+                    json.dump(
+                        hospitals_data,
+                        output_file,
+                        indent=4,
+                        ensure_ascii=False,
+                    )
+
+                print(
+                    f"Checkpoint saved: "
+                    f"{len(hospitals_data)} hospitals"
+                )
 
     hospitals_data.sort(
         key=lambda hospital: (
@@ -669,15 +758,6 @@ def main() -> None:
         start=1,
     ):
         hospital_data["record_id"] = record_id
-
-    output_dir = Path("outputs/raw")
-
-    output_dir.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    output_path = output_dir / "medigence_hospitals.json"
 
     with open(output_path, "w", encoding="utf-8") as output_file:
         json.dump(
