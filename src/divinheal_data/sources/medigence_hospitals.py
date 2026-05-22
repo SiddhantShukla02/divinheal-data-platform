@@ -623,13 +623,6 @@ def main() -> None:
     """Run MediGence hospital discovery extraction."""
 
     payload = fetch_listing_page(page=1)
-    print(
-        json.dumps(
-            payload,
-            indent=4,
-            ensure_ascii=False,
-        )[:15000]
-    )
 
     total_pages = extract_total_pages(payload)
 
