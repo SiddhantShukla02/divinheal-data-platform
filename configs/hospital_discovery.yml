@@ -1,0 +1,26 @@
+# -----------------------------------------------------------------------------
+# HOSPITAL DISCOVERY CONFIG
+# -----------------------------------------------------------------------------
+# PURPOSE:
+#   Controls lightweight hospital discovery scraping pipelines.
+#
+# NOTES:
+#   - This config is intentionally minimal.
+#   - Discovery pipelines currently focus on collecting:
+#       - hospital name
+#       - city
+#       - country
+#       - source URL
+#   - Deep enrichment is intentionally handled later.
+# -----------------------------------------------------------------------------
+
+target_countries:
+  - india
+  - thailand
+  - malaysia
+  - turkey
+  - south-korea
+
+sources:
+  medigence:
+    enabled: true
