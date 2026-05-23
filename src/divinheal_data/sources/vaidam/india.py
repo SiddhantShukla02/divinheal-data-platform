@@ -19,6 +19,10 @@ HEADERS = {
     ),
 }
 
+OUTPUT_PATH = Path(
+    "outputs/vaidam_scraper_india.json"
+)
+
 
 # =========================================================
 # FETCHING
@@ -63,18 +67,16 @@ def fetch_detail_page(
 
 
 # =========================================================
-# EXTRACTION
+# LISTING EXTRACTION
 # =========================================================
 
 def extract_hospital_cards(
     soup: BeautifulSoup,
 ):
 
-    cards = soup.select(
+    return soup.select(
         "div.dr-card-main"
     )
-
-    return cards
 
 
 def extract_total_pages(
@@ -82,7 +84,7 @@ def extract_total_pages(
 ) -> int:
 
     last_page_anchor = soup.select_one(
-        'ul.pagination li:last-child a'
+        "ul.pagination li:last-child a"
     )
 
     if not last_page_anchor:
@@ -111,6 +113,52 @@ def extract_total_pages(
     except ValueError:
 
         return 1
+
+
+def extract_location(
+    hospital_card,
+):
+
+    feature_rows = hospital_card.select(
+        "div.features-box p"
+    )
+
+    for row in feature_rows:
+
+        row_text = row.get_text(
+            " ",
+            strip=True,
+        )
+
+        if "Location:" in row_text:
+
+            cleaned_location = (
+                row_text
+                .replace(
+                    "Location:",
+                    "",
+                )
+                .strip()
+            )
+
+            location_parts = [
+                part.strip()
+                for part in cleaned_location.split(
+                    ","
+                )
+            ]
+
+            if len(location_parts) >= 2:
+
+                return {
+                    "country": location_parts[0],
+                    "city": location_parts[1],
+                }
+
+    return {
+        "country": "",
+        "city": "",
+    }
 
 
 def extract_hospital_name(
@@ -225,60 +273,9 @@ def extract_bed_count(
     return ""
 
 
-def extract_location(
-    hospital_card,
-):
-
-    feature_rows = hospital_card.select(
-        "div.features-box p"
-    )
-
-    for row in feature_rows:
-
-        row_text = row.get_text(
-            " ",
-            strip=True,
-        )
-
-        if "Location:" in row_text:
-
-            cleaned_location = (
-                row_text
-                .replace(
-                    "Location:",
-                    "",
-                )
-                .strip()
-            )
-
-            location_parts = [
-                part.strip()
-                for part in cleaned_location.split(
-                    ","
-                )
-            ]
-
-            if len(location_parts) >= 2:
-
-                country = location_parts[0]
-
-                city = location_parts[1]
-
-                return {
-                    "city": city,
-                    "country": country,
-                }
-
-            return {
-                "city": "",
-                "country": "",
-            }
-
-    return {
-        "city": "",
-        "country": "",
-    }
-
+# =========================================================
+# DETAIL PAGE EXTRACTION
+# =========================================================
 
 def extract_raw_address(
     detail_soup: BeautifulSoup,
@@ -312,6 +309,209 @@ def extract_raw_address(
     )
 
 
+def extract_accreditations(
+    detail_soup: BeautifulSoup,
+):
+
+    accreditation_images = detail_soup.select(
+        "img[alt]"
+    )
+
+    accreditations = []
+
+    known_accreditations = [
+        "JCI",
+        "NABH",
+        "NABL",
+        "ISO",
+    ]
+
+    for image in accreditation_images:
+
+        alt_text = image.get(
+            "alt",
+            "",
+        ).strip()
+
+        if not alt_text:
+
+            continue
+
+        for accreditation in known_accreditations:
+
+            if accreditation.lower() in (
+                alt_text.lower()
+            ):
+
+                if accreditation not in accreditations:
+
+                    accreditations.append(
+                        accreditation
+                    )
+
+    return accreditations
+
+
+def extract_specialties(
+    detail_soup: BeautifulSoup,
+):
+
+    specialties = []
+
+    specialty_section = detail_soup.select_one(
+        "div#speciality"
+    )
+
+    if not specialty_section:
+
+        specialty_section = detail_soup.find(
+            string=lambda text:
+            text
+            and "Specialities" in text
+        )
+
+        if specialty_section:
+
+            specialty_section = (
+                specialty_section.find_parent()
+            )
+
+    if not specialty_section:
+
+        return []
+
+    specialty_items = (
+        specialty_section.find_all(
+            [
+                "li",
+                "a",
+            ]
+        )
+    )
+
+    for item in specialty_items:
+
+        specialty = item.get_text(
+            " ",
+            strip=True,
+        )
+
+        if not specialty:
+
+            continue
+
+        if len(
+            specialty
+        ) > 100:
+
+            continue
+
+        specialties.append(
+            specialty
+        )
+
+    return list(
+        dict.fromkeys(
+            specialties
+        )
+    )
+
+
+def extract_overview_raw(
+    detail_soup: BeautifulSoup,
+) -> str:
+
+    about_section = detail_soup.find(
+        string=lambda text:
+        text
+        and "About Hospital" in text
+    )
+
+    if not about_section:
+
+        return ""
+
+    parent = about_section.find_parent()
+
+    if not parent:
+
+        return ""
+
+    paragraph_tags = parent.find_all_next(
+        "p",
+        limit=5,
+    )
+
+    overview_parts = []
+
+    for paragraph in paragraph_tags:
+
+        paragraph_text = (
+            paragraph.get_text(
+                " ",
+                strip=True,
+            )
+        )
+
+        if paragraph_text:
+
+            overview_parts.append(
+                paragraph_text
+            )
+
+    return "\n".join(
+        overview_parts
+    )
+
+
+def extract_infrastructure_raw(
+    detail_soup: BeautifulSoup,
+) -> str:
+
+    infrastructure_section = detail_soup.find(
+        string=lambda text:
+        text
+        and "Infrastructure" in text
+    )
+
+    if not infrastructure_section:
+
+        return ""
+
+    parent = infrastructure_section.find_parent()
+
+    if not parent:
+
+        return ""
+
+    paragraph_tags = parent.find_all_next(
+        [
+            "p",
+            "li",
+        ],
+        limit=20,
+    )
+
+    infrastructure_parts = []
+
+    for item in paragraph_tags:
+
+        item_text = item.get_text(
+            " ",
+            strip=True,
+        )
+
+        if item_text:
+
+            infrastructure_parts.append(
+                item_text
+            )
+
+    return "\n".join(
+        infrastructure_parts
+    )
+
+
 # =========================================================
 # TRANSFORMATION
 # =========================================================
@@ -323,6 +523,10 @@ def build_hospital_data(
     bed_count: str,
     location_data,
     raw_address: str,
+    accreditations,
+    specialties,
+    overview_raw: str,
+    infrastructure_raw: str,
 ):
 
     validation_errors = []
@@ -331,18 +535,6 @@ def build_hospital_data(
 
         validation_errors.append(
             "ERROR_MISSING_HOSPITAL_NAME"
-        )
-
-    if not bed_count:
-
-        validation_errors.append(
-            "ERROR_MISSING_BED_COUNT"
-        )
-
-    if not established_year:
-
-        validation_errors.append(
-            "ERROR_MISSING_ESTABLISHED_YEAR"
         )
 
     validation_status = (
@@ -355,27 +547,75 @@ def build_hospital_data(
 
     return {
         "hospital_name": hospital_name,
-        "normalized_location": {
-            "city": location_data[
-                "city"
-            ],
-            "country": location_data[
-                "country"
-            ],
+
+        "location": {
+            "city": location_data.get(
+                "city",
+                "",
+            ),
+            "country": location_data.get(
+                "country",
+                "",
+            ),
+            "address_raw": raw_address,
         },
-        "details": {
-            "established_year": established_year,
+
+        "info": {
             "bed_count": bed_count,
-            "raw_address": raw_address,
+            "year_founded": established_year,
+            "accreditations": (
+                accreditations
+                if accreditations
+                else []
+            ),
         },
+
+        "specialties": (
+            specialties
+            if specialties
+            else []
+        ),
+
+        "details": {
+            "overview_raw": overview_raw,
+
+            "infrastructure_raw": (
+                infrastructure_raw
+            ),
+        },
+
         "source": {
             "source_name": "vaidam",
             "source_url": source_url,
         },
+
         "validation": {
             "status": validation_status,
         },
     }
+
+
+# =========================================================
+# UTILITIES
+# =========================================================
+
+def save_checkpoint(
+    hospitals,
+) -> None:
+
+    OUTPUT_PATH.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    OUTPUT_PATH.write_text(
+        json.dumps(
+            hospitals,
+            indent=4,
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
 
 
 # =========================================================
@@ -385,10 +625,6 @@ def build_hospital_data(
 def main() -> None:
 
     all_hospitals = []
-
-    output_path = Path(
-        "outputs/vaidam_scraper_india.json"
-    )
 
     first_page_soup = fetch_listing_page(
         page=1,
@@ -404,7 +640,8 @@ def main() -> None:
 
     for page in range(
         1,
-        total_pages + 1,
+        # total_pages + 1,
+        2
     ):
 
         print(
@@ -428,7 +665,7 @@ def main() -> None:
         if not cards:
 
             print(
-                f"No cards found on page {page}. Stopping pagination."
+                f"No cards found on page {page}"
             )
 
             break
@@ -474,6 +711,30 @@ def main() -> None:
                     )
                 )
 
+                accreditations = (
+                    extract_accreditations(
+                        detail_soup,
+                    )
+                )
+
+                specialties = (
+                    extract_specialties(
+                        detail_soup,
+                    )
+                )
+
+                overview_raw = (
+                    extract_overview_raw(
+                        detail_soup,
+                    )
+                )
+
+                infrastructure_raw = (
+                    extract_infrastructure_raw(
+                        detail_soup,
+                    )
+                )
+
                 hospital_data = (
                     build_hospital_data(
                         hospital_name=hospital_name,
@@ -482,6 +743,10 @@ def main() -> None:
                         bed_count=bed_count,
                         location_data=location_data,
                         raw_address=raw_address,
+                        accreditations=accreditations,
+                        specialties=specialties,
+                        overview_raw=overview_raw,
+                        infrastructure_raw=infrastructure_raw,
                     )
                 )
 
@@ -493,17 +758,8 @@ def main() -> None:
                     all_hospitals
                 ) % 50 == 0:
 
-                    output_path.parent.mkdir(
-                        parents=True,
-                        exist_ok=True,
-                    )
-
-                    output_path.write_text(
-                        json.dumps(
-                            all_hospitals,
-                            indent=4,
-                        ),
-                        encoding="utf-8",
+                    save_checkpoint(
+                        all_hospitals,
                     )
 
                     print(
@@ -523,30 +779,19 @@ def main() -> None:
         start=1,
     ):
 
-        reordered_hospital = {
+        all_hospitals[
+            index - 1
+        ] = {
             "record_id": index,
             **hospital,
         }
 
-        all_hospitals[
-            index - 1
-        ] = reordered_hospital
-
-    output_path.parent.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    output_path.write_text(
-        json.dumps(
-            all_hospitals,
-            indent=4,
-        ),
-        encoding="utf-8",
+    save_checkpoint(
+        all_hospitals,
     )
 
     print(
-        f"Saved {len(all_hospitals)} hospitals to {output_path}"
+        f"Saved {len(all_hospitals)} hospitals to {OUTPUT_PATH}"
     )
 
 
