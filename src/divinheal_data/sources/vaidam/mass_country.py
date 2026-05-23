@@ -9,19 +9,38 @@ from bs4 import BeautifulSoup
 # CONFIG
 # =========================================================
 
+
 BASE_URL = (
-    "https://www.vaidam.com/hospitals/india?page={page}"
+    "https://www.vaidam.com/hospitals/{country}?page={page}"
 )
+
+country_list = [
+    "india",
+    "germany",
+    "turkey",
+    "united-arab-emirates",
+    "tunisia",
+    "south-korea",
+    "egypt",
+    "spain",
+    "france",
+    "malaysia",
+    "thailand",
+    "cyprus",
+    "south-africa",
+    "singapore",
+    "israel",
+    "czech-republic",
+    "austria",
+    "poland",
+    "switzerland",
+] 
 
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0"
     ),
 }
-
-OUTPUT_PATH = Path(
-    "outputs/vaidam_scraper_india.json"
-)
 
 
 # =========================================================
@@ -30,11 +49,13 @@ OUTPUT_PATH = Path(
 
 def fetch_listing_page(
     page: int,
+    country: str,
 ) -> BeautifulSoup:
 
     response = requests.get(
         BASE_URL.format(
             page=page,
+            country=country,
         ),
         headers=HEADERS,
         timeout=30,
@@ -601,14 +622,15 @@ def build_hospital_data(
 
 def save_checkpoint(
     hospitals,
+    output_path: Path, 
 ) -> None:
 
-    OUTPUT_PATH.parent.mkdir(
+    output_path.parent.mkdir(
         parents=True,
         exist_ok=True,
     )
 
-    OUTPUT_PATH.write_text(
+    output_path.write_text(
         json.dumps(
             hospitals,
             indent=4,
@@ -625,174 +647,192 @@ def save_checkpoint(
 def main() -> None:
 
     all_hospitals = []
+    
+    for country in country_list:
+    
+        
+        OUTPUT_PATH = Path(
+            f"outputs/tests/vaidam_scraper_{country}.json"
+        ) 
 
-    first_page_soup = fetch_listing_page(
-        page=1,
-    )
+        first_page_soup = fetch_listing_page(
+            page=1,
+            country=country,
+        )
 
-    total_pages = extract_total_pages(
-        first_page_soup,
-    )
-
-    print(
-        f"Detected {total_pages} total pages"
-    )
-
-    for page in range(
-        1,
-        # total_pages + 1,
-        2
-    ):
+        total_pages = extract_total_pages(
+            first_page_soup,
+        )
 
         print(
-            f"Fetching page {page}/{total_pages}"
+            f"Working on {country} now..."
         )
 
-        if page == 1:
-
-            soup = first_page_soup
-
-        else:
-
-            soup = fetch_listing_page(
-                page=page,
-            )
-
-        cards = extract_hospital_cards(
-            soup,
+        print(
+            f"Detected {total_pages} total pages"
         )
 
-        if not cards:
+        for page in range(
+            1,
+            # total_pages + 1,
+            2
+        ):
 
             print(
-                f"No cards found on page {page}"
+                f"Fetching page {page}/{total_pages}"
             )
 
-            break
+            if page == 1:
 
-        for card in cards:
+                soup = first_page_soup
 
-            try:
+            else:
 
-                location_data = extract_location(
-                    card,
+                soup = fetch_listing_page(
+                    page=page,
                 )
 
-                hospital_name = (
-                    extract_hospital_name(
-                        card,
-                        city=location_data[
-                            "city"
-                        ],
-                    )
-                )
+            cards = extract_hospital_cards(
+                soup,
+            )
 
-                source_url = extract_source_url(
-                    card,
-                )
-
-                established_year = (
-                    extract_established_year(
-                        card,
-                    )
-                )
-
-                bed_count = extract_bed_count(
-                    card,
-                )
-
-                detail_soup = fetch_detail_page(
-                    source_url,
-                )
-
-                raw_address = (
-                    extract_raw_address(
-                        detail_soup,
-                    )
-                )
-
-                accreditations = (
-                    extract_accreditations(
-                        detail_soup,
-                    )
-                )
-
-                specialties = (
-                    extract_specialties(
-                        detail_soup,
-                    )
-                )
-
-                overview_raw = (
-                    extract_overview_raw(
-                        detail_soup,
-                    )
-                )
-
-                infrastructure_raw = (
-                    extract_infrastructure_raw(
-                        detail_soup,
-                    )
-                )
-
-                hospital_data = (
-                    build_hospital_data(
-                        hospital_name=hospital_name,
-                        source_url=source_url,
-                        established_year=established_year,
-                        bed_count=bed_count,
-                        location_data=location_data,
-                        raw_address=raw_address,
-                        accreditations=accreditations,
-                        specialties=specialties,
-                        overview_raw=overview_raw,
-                        infrastructure_raw=infrastructure_raw,
-                    )
-                )
-
-                all_hospitals.append(
-                    hospital_data
-                )
-
-                if len(
-                    all_hospitals
-                ) % 50 == 0:
-
-                    save_checkpoint(
-                        all_hospitals,
-                    )
-
-                    print(
-                        f"Checkpoint saved after {len(all_hospitals)} hospitals"
-                    )
-
-            except Exception as error:
+            if not cards:
 
                 print(
-                    f"Failed hospital: {error}"
+                    f"No cards found on page {page}"
                 )
 
-                continue
+                break
 
-    for index, hospital in enumerate(
-        all_hospitals,
-        start=1,
-    ):
+            for card in cards:
 
-        all_hospitals[
-            index - 1
-        ] = {
-            "record_id": index,
-            **hospital,
-        }
+                try:
 
-    save_checkpoint(
-        all_hospitals,
-    )
+                    location_data = extract_location(
+                        card,
+                    )
 
-    print(
-        f"Saved {len(all_hospitals)} hospitals to {OUTPUT_PATH}"
-    )
+                    hospital_name = (
+                        extract_hospital_name(
+                            card,
+                            city=location_data[
+                                "city"
+                            ],
+                        )
+                    )
+
+                    source_url = extract_source_url(
+                        card,
+                    )
+
+                    established_year = (
+                        extract_established_year(
+                            card,
+                        )
+                    )
+
+                    bed_count = extract_bed_count(
+                        card,
+                    )
+
+                    detail_soup = fetch_detail_page(
+                        source_url,
+                    )
+
+                    raw_address = (
+                        extract_raw_address(
+                            detail_soup,
+                        )
+                    )
+
+                    accreditations = (
+                        extract_accreditations(
+                            detail_soup,
+                        )
+                    )
+
+                    specialties = (
+                        extract_specialties(
+                            detail_soup,
+                        )
+                    )
+
+                    overview_raw = (
+                        extract_overview_raw(
+                            detail_soup,
+                        )
+                    )
+
+                    infrastructure_raw = (
+                        extract_infrastructure_raw(
+                            detail_soup,
+                        )
+                    )
+
+                    hospital_data = (
+                        build_hospital_data(
+                            hospital_name=hospital_name,
+                            source_url=source_url,
+                            established_year=established_year,
+                            bed_count=bed_count,
+                            location_data=location_data,
+                            raw_address=raw_address,
+                            accreditations=accreditations,
+                            specialties=specialties,
+                            overview_raw=overview_raw,
+                            infrastructure_raw=infrastructure_raw,
+                        )
+                    )
+
+                    all_hospitals.append(
+                        hospital_data
+                    )
+
+                    if len(
+                        all_hospitals
+                    ) % 50 == 0:
+
+                        save_checkpoint(
+                            all_hospitals,
+                            OUTPUT_PATH,
+                        )
+
+                        print(
+                            f"Checkpoint saved after {len(all_hospitals)} hospitals"
+                        )
+
+                except Exception as error:
+
+                    print(
+                        f"Failed hospital: {error}"
+                    )
+
+                    continue
+
+        for index, hospital in enumerate(
+            all_hospitals,
+            start=1,
+        ):
+
+            all_hospitals[
+                index - 1
+            ] = {
+                "record_id": index,
+                **hospital,
+            }
+
+        save_checkpoint(
+            all_hospitals,
+            OUTPUT_PATH,
+        )
+
+        print(
+            f"Saved {len(all_hospitals)} hospitals to {OUTPUT_PATH}"
+        )
+
+        print(
+            "\n Switching to next country now.\n\n"
+        )
 
 
 if __name__ == "__main__":
