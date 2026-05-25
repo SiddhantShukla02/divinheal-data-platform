@@ -47,6 +47,10 @@ def load_hospitals_page(
         'a.block[href^="/hospitals/"]'
     )
 
+    dismiss_listing_popups(
+        page,
+    )
+
 
 def scroll_until_complete(
     page,
@@ -438,6 +442,147 @@ def extract_address_raw(
     return address_raw
 
 
+def extract_image_urls(
+    detail_page,
+    source_url,
+):
+
+    image_urls = []
+
+    gallery_trigger = (
+        detail_page.query_selector(
+            'div.mb-3.md\\:mb-6 div.cursor-pointer'
+        )
+    )
+
+    if not gallery_trigger:
+
+        print(
+            f"Gallery trigger not found: {source_url}"
+        )
+
+        return image_urls
+
+    gallery_trigger.scroll_into_view_if_needed()
+
+    detail_page.wait_for_timeout(
+        1000
+    )
+
+    gallery_trigger.click(
+        force=True
+    )
+
+    try:
+
+        detail_page.wait_for_selector(
+            'div.overflow-x-auto',
+            timeout=5000,
+        )
+
+    except:
+
+        expand_gallery_button = (
+            detail_page.query_selector(
+                'text="+'
+            )
+        )
+
+        if expand_gallery_button:
+
+            expand_gallery_button.scroll_into_view_if_needed()
+
+            detail_page.wait_for_timeout(
+                1000
+            )
+
+            expand_gallery_button.click(
+                force=True
+            )
+
+            try:
+
+                detail_page.wait_for_selector(
+                    'div.overflow-x-auto',
+                    timeout=5000,
+                )
+
+            except:
+
+                print(
+                    f"Gallery strip failed to open: {source_url}"
+                )
+
+                return image_urls
+
+        else:
+
+            print(
+                f"Expand gallery button not found: {source_url}"
+            )
+
+            return image_urls
+
+    detail_page.wait_for_timeout(
+        1000
+    )
+
+    image_elements = (
+        detail_page.query_selector_all(
+            'div.overflow-x-auto img'
+        )
+    )
+
+    print(
+        f"Found {len(image_elements)} image elements"
+    )
+
+    for image_element in image_elements:
+
+        image_url = (
+            image_element.get_attribute(
+                "src"
+            )
+            or image_element.get_attribute(
+                "data-src"
+            )
+        )
+
+        if not image_url:
+
+            continue
+
+        if image_url.startswith(
+            "/"
+        ):
+
+            image_url = (
+                "https://curemeabroad.com"
+                + image_url
+            )
+
+        image_url = image_url.split(
+            "&w=",
+            1,
+        )[0]
+
+        if image_url in image_urls:
+
+            continue
+
+        image_urls.append(
+            image_url
+        )
+
+    if not image_urls:
+
+        print(
+            f"Image extraction failed: {source_url}"
+        )
+
+    return image_urls
+
+
 # =========================================================
 # PARSING
 # =========================================================
@@ -508,6 +653,196 @@ def save_json(
         encoding="utf-8",
     )
 
+
+# ============================================================
+# PAGINATION
+# ============================================================
+
+def go_to_next_page(
+    page,
+):
+
+    cards_before = (
+        extract_hospital_cards(
+            page,
+        )
+    )
+
+    if not cards_before:
+
+        print(
+            "No cards found before pagination"
+        )
+
+        return False
+
+    first_url_before = (
+        cards_before[0]
+        .get_attribute(
+            "href"
+        )
+    )
+
+    try:
+
+        remove_blocking_overlays(
+            page,
+        )
+
+        next_button = (
+            page.locator(
+                'nav ul li:last-child button'
+            )
+        )
+
+        next_button.scroll_into_view_if_needed()
+
+        next_button.click(
+            timeout=5000,
+        )
+
+    except Exception as error:
+
+        print(
+            f"Pagination click failed: {error}"
+        )
+
+        return False
+
+    for _ in range(20):
+
+        page.wait_for_timeout(
+            1000
+        )
+
+        remove_blocking_overlays(
+            page,
+        )
+
+        cards_after = (
+            extract_hospital_cards(
+                page,
+            )
+        )
+
+        if not cards_after:
+
+            continue
+
+        first_url_after = (
+            cards_after[0]
+            .get_attribute(
+                "href"
+            )
+        )
+
+        if (
+            first_url_after
+            != first_url_before
+        ):
+
+            print(
+                "Moved to next page"
+            )
+
+            return True
+
+    print(
+        "Pagination failed"
+    )
+
+    return False
+
+
+def dismiss_listing_popups(
+    page,
+):
+
+    try:
+
+        reject_cookie_button = (
+            page.query_selector(
+                'button:text("Reject All")'
+            )
+        )
+
+        if reject_cookie_button:
+
+            reject_cookie_button.click(
+                force=True
+            )
+
+            page.wait_for_timeout(
+                1000
+            )
+
+            print(
+                "Cookie popup dismissed"
+            )
+
+    except:
+
+        pass
+
+    try:
+
+        modal_close_button = (
+            page.query_selector(
+                'button svg.lucide-x'
+            )
+        )
+
+        if modal_close_button:
+
+            modal_close_button.click(
+                force=True
+            )
+
+            page.wait_for_timeout(
+                1000
+            )
+
+            print(
+                "Modal popup dismissed"
+            )
+
+    except:
+
+        pass
+
+
+def remove_blocking_overlays(
+    page,
+):
+
+    try:
+
+        page.evaluate(
+            """
+            () => {
+
+                const overlays = document.querySelectorAll(
+                    `
+                    div.fixed.inset-0,
+                    div[class*="fixed"][class*="inset-0"],
+                    div[class*="backdrop"],
+                    div[class*="z-[100001]"]
+                    `
+                );
+
+                overlays.forEach(
+                    overlay => overlay.remove()
+                );
+            }
+            """
+        )
+
+    except:
+
+        pass
+
+
+
 # =========================================================
 # ORCHESTRATION
 # =========================================================
@@ -526,113 +861,193 @@ def main():
             page,
         )
 
-        scroll_until_complete(
-            page,
-        )
-
-        cards = extract_hospital_cards(
-            page,
-        )
-
-        print(
-            f"Found {len(cards)} hospital cards"
-        )
-
         hospitals = []
 
-        for card in cards[:1]:
+        seen_urls = set()
 
-            listing_data = (
-                build_listing_data(
-                    card,
-                )
+        while True:
+
+            scroll_until_complete(
+                page,
             )
 
-            detail_page = (
-                open_detail_page(
-                    browser,
+            cards = extract_hospital_cards(
+                page,
+            )
+
+            print(
+                f"Found {len(cards)} hospital cards"
+            )
+
+            for card in cards:
+
+                listing_data = (
+                    build_listing_data(
+                        card,
+                    )
+                )
+
+                source_url = (
                     listing_data[
                         "source_url"
-                    ],
+                    ]
+                )
+
+                if source_url in seen_urls:
+
+                    continue
+
+                seen_urls.add(
+                    source_url
+                )
+
+                print(
+                    f"\nProcessing: {source_url}"
+                )
+
+                try:
+
+                    detail_page = (
+                        open_detail_page(
+                            browser,
+                            source_url,
+                        )
+                    )
+
+                    address_raw = (
+                        extract_address_raw(
+                            detail_page,
+                        )
+                    )
+
+                    payment_methods = (
+                        extract_payment_methods(
+                            detail_page,
+                        )
+                    )
+
+                    accessibility_features = (
+                        extract_accessibility_features(
+                            detail_page,
+                        )
+                    )
+
+                    highlights = (
+                        extract_highlights(
+                            detail_page,
+                        )
+                    )
+
+                    parsed_highlights = (
+                        parse_highlights(
+                            highlights,
+                        )
+                    )
+
+                    room_types = (
+                        extract_room_types(
+                            detail_page,
+                        )
+                    )
+
+                    image_urls = (
+                        extract_image_urls(
+                            detail_page,
+                            source_url,
+                        )
+                    )
+
+                    detail_data = {
+
+                        "image_urls": image_urls,
+
+                        "location": {
+                            "address_raw": address_raw,
+                        },
+
+                        "highlights": (
+                            parsed_highlights
+                        ),
+
+                        "payment_methods": (
+                            payment_methods
+                        ),
+
+                        "room_types": (
+                            room_types
+                        ),
+
+                        "accessibility_features": (
+                            accessibility_features
+                        ),
+
+                        "validation": {
+
+                            "image_extraction": (
+                                "SUCCESS"
+                                if image_urls
+                                else "FAILED"
+                            ),
+
+                            "image_count": len(
+                                image_urls
+                            ),
+                        },
+                    }
+
+                    hospital_data = (
+                        build_hospital_data(
+                            listing_data,
+                            detail_data,
+                        )
+                    )
+
+                    hospitals.append(
+                        hospital_data,
+                    )
+
+                    print(
+                        f"Extracted {len(hospitals)} hospitals"
+                    )
+
+                except Exception as error:
+
+                    print(
+                        f"Failed: {source_url}"
+                    )
+
+                    print(
+                        error
+                    )
+
+                finally:
+
+                    detail_page.close()
+
+                
+            save_json(
+                hospitals
+            )
+
+            print(
+                f"Saved JSON to {OUTPUT_PATH}"
+            )
+
+            has_next_page = (
+                go_to_next_page(
+                    page,
                 )
             )
 
-            address_raw = (
-                extract_address_raw(
-                    detail_page,
-                )
-            )
+            if not has_next_page:
 
-            payment_methods = (
-                extract_payment_methods(
-                    detail_page,
-                )
-            )
-
-            accessibility_features = (
-                extract_accessibility_features(
-                    detail_page,
-                )
-            )
-
-            highlights = (
-                extract_highlights(
-                    detail_page,
-                )
-            )
-
-            parsed_highlights = parse_highlights(
-                highlights,
-            )
-
-            room_types = (
-                extract_room_types(
-                    detail_page,
-                )
-            )
-
-
-
-            detail_data = {
-                "location":{
-                    "address_raw": address_raw,
-                },
-
-                "highlights" : parsed_highlights,
-
-                "payment_methods": payment_methods,
-
-                "room_types": room_types,
-
-                "accessibility_features": accessibility_features,
-
-            }
-
-            detail_page.close()
-
-            hospital_data = build_hospital_data(
-                listing_data,
-                detail_data,
-            )
-
-            hospitals.append(
-                hospital_data,
-            )
+                break
 
         print(
-            f"\nExtracted {len(hospitals)} hospitals"
-        )
-
-        #JSON export
-        save_json(hospitals)
-        print(f"Saved as JSON file to {OUTPUT_PATH}")
-
-        input(
-            "\nPress ENTER to close browser..."
+            f"\nFinal hospital count: {len(hospitals)}"
         )
 
         browser.close()
-
 
 if __name__ == "__main__":
 
