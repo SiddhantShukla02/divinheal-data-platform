@@ -365,71 +365,6 @@ def extract_accreditations(
     return accreditations
 
 
-def extract_specialties(
-    detail_soup: BeautifulSoup,
-):
-
-    specialties = []
-
-    specialty_section = detail_soup.select_one(
-        "div#speciality"
-    )
-
-    if not specialty_section:
-
-        specialty_section = detail_soup.find(
-            string=lambda text:
-            text
-            and "Specialities" in text
-        )
-
-        if specialty_section:
-
-            specialty_section = (
-                specialty_section.find_parent()
-            )
-
-    if not specialty_section:
-
-        return []
-
-    specialty_items = (
-        specialty_section.find_all(
-            [
-                "li",
-                "a",
-            ]
-        )
-    )
-
-    for item in specialty_items:
-
-        specialty = item.get_text(
-            " ",
-            strip=True,
-        )
-
-        if not specialty:
-
-            continue
-
-        if len(
-            specialty
-        ) > 100:
-
-            continue
-
-        specialties.append(
-            specialty
-        )
-
-    return list(
-        dict.fromkeys(
-            specialties
-        )
-    )
-
-
 def extract_overview_raw(
     detail_soup: BeautifulSoup,
 ) -> str:
@@ -525,6 +460,47 @@ def extract_infrastructure_raw(
     )
 
 
+def extract_image_urls(
+    detail_soup: BeautifulSoup,
+) -> list:
+
+    image_section = detail_soup.select_one(
+        "div.hos-img-statics"
+    )
+
+    if not image_section:
+        return []
+
+    images = image_section.select(
+        "img.hospital-pic"
+    )
+
+    return [
+        img.get("src", "")
+        for img in images
+        if img.get("src", "")
+    ]
+
+
+def extract_treatments(detail_soup: BeautifulSoup) -> list:
+
+    accordion = detail_soup.select_one("div#acrdnDrDepart")
+
+    if not accordion:
+        return []
+
+    treatments = []
+
+    for anchor in accordion.select("div.accordion-header a[title]"):
+
+        title = anchor.get("title", "").strip()
+
+        if title:
+            treatments.append(title.title())  # "CARDIOLOGY AND CARDIAC SURGERY" → "Cardiology And Cardiac Surgery"
+
+    return list(dict.fromkeys(treatments))  # dedupe
+
+
 # =========================================================
 # TRANSFORMATION
 # =========================================================
@@ -537,9 +513,10 @@ def build_hospital_data(
     location_data,
     raw_address: str,
     accreditations,
-    specialties,
     overview_raw: str,
     infrastructure_raw: str,
+    image_urls,
+    treatments,
 ):
 
     validation_errors = []
@@ -560,6 +537,8 @@ def build_hospital_data(
 
     return {
         "hospital_name": hospital_name,
+
+        "image_urls": image_urls,
 
         "location": {
             "city": location_data.get(
@@ -583,11 +562,7 @@ def build_hospital_data(
             ),
         },
 
-        "specialties": (
-            specialties
-            if specialties
-            else []
-        ),
+        "treatments": treatments if treatments else [],
 
         "details": {
             "overview_raw": overview_raw,
@@ -710,9 +685,10 @@ async def main() -> None:
                                 location_data=card_data["location_data"],
                                 raw_address=extract_raw_address(detail_soup),
                                 accreditations=extract_accreditations(detail_soup),
-                                specialties=extract_specialties(detail_soup),
                                 overview_raw=extract_overview_raw(detail_soup),
                                 infrastructure_raw=extract_infrastructure_raw(detail_soup),
+                                image_urls=extract_image_urls(detail_soup),
+                                treatments=extract_treatments(detail_soup),
                             )
 
                             hospital_data = {"record_id": len(all_hospitals) + 1, **hospital_data}
