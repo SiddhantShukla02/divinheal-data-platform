@@ -348,6 +348,53 @@ def extract_accreditations(
     return accreditations
 
 
+def extract_image_urls(
+    soup: BeautifulSoup,
+) -> list[str]:
+    """Extract hospital gallery images."""
+
+    image_urls = []
+
+    # Main hero image
+    hero_image = soup.select_one(
+        "img.banner-main-img"
+    )
+
+    if hero_image:
+
+        hero_url = (
+            hero_image.get("src", "")
+            .strip()
+        )
+
+        if hero_url:
+            image_urls.append(
+                hero_url
+            )
+
+    # Gallery images
+    gallery_links = soup.select(
+        'a[data-lightbox="gallery"]'
+    )
+
+    for gallery_link in gallery_links:
+
+        image_url = (
+            gallery_link.get("href", "")
+            .strip()
+        )
+
+        if not image_url:
+            continue
+
+        if image_url not in image_urls:
+            image_urls.append(
+                image_url
+            )
+
+    return image_urls
+
+
 def extract_hospital_data(
     hospital_card: Any,
 ) -> dict[str, Any]:
@@ -359,6 +406,14 @@ def extract_hospital_data(
 
     hospital_url = extract_hospital_url(
         hospital_card,
+    )
+
+    detail_soup = fetch_hospital_page(
+        hospital_url,
+    )
+
+    image_urls = extract_image_urls(
+        detail_soup,
     )
 
     city, country = extract_hospital_location(
@@ -403,6 +458,8 @@ def extract_hospital_data(
         "record_id": None,
 
         "hospital_name": hospital_name,
+
+        "image_urls": image_urls,
 
         "location": {
             "city": city,
@@ -614,41 +671,33 @@ def fetch_listing_page(page: int) -> dict[str, Any]:
     return payload
 
 
-# def fetch_hospital_page(
-#     hospital_url: str,
-# ) -> BeautifulSoup:
-#     """Fetch and parse a hospital detail page."""
+def fetch_hospital_page(
+    hospital_url: str,
+) -> BeautifulSoup:
+    """Fetch and parse a hospital detail page."""
 
-#     response = requests.get(
-#         hospital_url,
-#         headers={
-#             "User-Agent": (
-#                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-#                 "AppleWebKit/537.36 (KHTML, like Gecko) "
-#                 "Chrome/148.0.0.0 Safari/537.36"
-#             ),
-#         },
-#         timeout=30,
-#     )
-#     print("\nFINAL RESPONSE URL:\n")
+    response = requests.get(
+        hospital_url,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/148.0.0.0 Safari/537.36"
+            ),
+        },
+        timeout=30,
+    )
 
-#     print(
-#         response.url
-#     )
+    response.raise_for_status()
 
-#     print("\nPAGE TITLE:\n")
+    soup = BeautifulSoup(
+        response.text,
+        "lxml",
+    )
 
-#     soup = BeautifulSoup(
-#         response.text,
-#         "lxml",
-#     )
+    response.raise_for_status()
 
-#     print(
-#         soup.title
-#     )
-#     response.raise_for_status()
-
-#     return soup
+    return soup
 
 
 # -----------------------------------------------------------------------------
