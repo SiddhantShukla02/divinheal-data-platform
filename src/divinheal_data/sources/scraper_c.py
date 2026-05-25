@@ -1,4 +1,7 @@
+import json
+
 from pathlib import Path
+
 
 from playwright.sync_api import (
     sync_playwright,
@@ -13,12 +16,8 @@ BASE_URL = (
     "https://curemeabroad.com/hospitals"
 )
 
-SOURCE_NAME = (
-    "curemeabroad"
-)
-
 OUTPUT_PATH = Path(
-    "outputs/curemeabroad_hospitals.json"
+    "outputs/raw/curemeabroad_hospitals.json"
 )
 
 
@@ -41,7 +40,11 @@ def load_hospitals_page(
 
     page.goto(
         BASE_URL,
-        wait_until="networkidle",
+        wait_until="domcontentloaded",
+    )
+
+    page.wait_for_selector(
+        'a.block[href^="/hospitals/"]'
     )
 
 
@@ -70,10 +73,6 @@ def scroll_until_complete(
             cards
         )
 
-        print(
-            f"Loaded {current_card_count} cards"
-        )
-
         if (
             current_card_count
             == previous_card_count
@@ -84,6 +83,8 @@ def scroll_until_complete(
         previous_card_count = (
             current_card_count
         )
+
+    print(f"Loaded {current_card_count} cards")
 
 
 # =========================================================
@@ -185,15 +186,7 @@ def build_listing_data(
             description_raw
         ),
 
-        "source": {
-            "source_name": (
-                SOURCE_NAME
-            ),
-
-            "source_url": (
-                source_url
-            ),
-        },
+        "source_url": source_url,
     }
 
 
@@ -214,38 +207,6 @@ def open_detail_page(
     )
 
     return detail_page
-
-
-def extract_location(
-    detail_page,
-) -> str or None:
-
-    location_container = (
-        detail_page.query_selector(
-            'div.flex.md\\:items-center.gap-1'
-        )
-    )
-
-    if not location_container:
-        return None 
-
-    address_element = (
-        location_container.query_selector(
-            'h4'
-        )
-    )
-
-    if not address_element:
-        return None
-
-    address_raw = address_element.inner_text()
-
-    if not address_raw:
-        return None
-
-    print(address_raw) if address_raw else print("error , container not found")
-
-    return address_raw
 
 
 def extract_payment_methods(
@@ -449,27 +410,84 @@ def extract_accreditations(
 
 def extract_address_raw(
     detail_page,
-) -> str:
+) -> str or None:
 
-    return ""
+    location_container = (
+        detail_page.query_selector(
+            'div.flex.md\\:items-center.gap-1'
+        )
+    )
 
+    if not location_container:
+        return None 
+
+    address_element = (
+        location_container.query_selector(
+            'h4'
+        )
+    )
+
+    if not address_element:
+        return None
+
+    address_raw = address_element.inner_text()
+
+    if not address_raw:
+        return None
+
+    return address_raw
+
+
+# =========================================================
+# PARSING
+# =========================================================
+
+def parse_highlights(
+    highlights
+):  
+
+    parsed_highlights = {}
+
+    for highlight in highlights:
+        if ":" in highlight:
+
+            label, value = highlight.split(":")
+
+            label = label.strip().lower()
+            value = value.strip()
+
+            if label == "bed count":
+                parsed_highlights["bed_count"] = int(value)
+            elif label == "icu count":
+                parsed_highlights["icu_count"] = int(value)
+            elif label == "ot count":
+                parsed_highlights["ot_count"] = int(value)
+            
+        elif "Established" in highlight:
+
+            value = highlight.split()[-1]
+
+            parsed_highlights["year_founded"] = int(value)
+   
+    return parsed_highlights
 
 # =========================================================
 # TRANSFORMATION
 # =========================================================
 
 def build_hospital_data(
-    listing_data,
+    listing_data=None,
     detail_data=None,
 ):
 
     return {
         **listing_data,
+        **detail_data,
     }
 
 
 # =========================================================
-# PERSISTENCE
+# EXPORTING
 # =========================================================
 
 def save_json(
@@ -482,10 +500,13 @@ def save_json(
     )
 
     OUTPUT_PATH.write_text(
-        str(hospitals),
+        json.dumps(
+            hospitals,
+            indent=4,
+            ensure_ascii=False,
+        ),
         encoding="utf-8",
     )
-
 
 # =========================================================
 # ORCHESTRATION
@@ -531,15 +552,15 @@ def main():
                 open_detail_page(
                     browser,
                     listing_data[
-                        "source"
-                    ][
                         "source_url"
                     ],
                 )
             )
 
-            extract_location(
-                detail_page,
+            address_raw = (
+                extract_address_raw(
+                    detail_page,
+                )
             )
 
             payment_methods = (
@@ -560,41 +581,51 @@ def main():
                 )
             )
 
+            parsed_highlights = parse_highlights(
+                highlights,
+            )
+
             room_types = (
                 extract_room_types(
                     detail_page,
                 )
             )
 
-            print(
-                payment_methods
-            )
 
-            print(
-                accessibility_features
-            )
 
-            print(
-                highlights
-            )
+            detail_data = {
+                "location":{
+                    "address_raw": address_raw,
+                },
 
-            print(
-                room_types
-            )
+                "highlights" : parsed_highlights,
+
+                "payment_methods": payment_methods,
+
+                "room_types": room_types,
+
+                "accessibility_features": accessibility_features,
+
+            }
 
             detail_page.close()
 
-            hospitals.append(
+            hospital_data = build_hospital_data(
                 listing_data,
+                detail_data,
+            )
+
+            hospitals.append(
+                hospital_data,
             )
 
         print(
             f"\nExtracted {len(hospitals)} hospitals"
         )
 
-        print(
-            hospitals[0]
-        )
+        #JSON export
+        save_json(hospitals)
+        print(f"Saved as JSON file to {OUTPUT_PATH}")
 
         input(
             "\nPress ENTER to close browser..."

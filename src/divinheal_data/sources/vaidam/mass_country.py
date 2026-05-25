@@ -4,6 +4,9 @@ from pathlib import Path
 import requests
 from bs4 import BeautifulSoup
 
+import time
+import asyncio
+import aiohttp
 
 # =========================================================
 # CONFIG
@@ -38,7 +41,7 @@ country_list = [
 
 HEADERS = {
     "User-Agent": (
-        "Mozilla/5.0"
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     ),
 }
 
@@ -47,44 +50,33 @@ HEADERS = {
 # FETCHING
 # =========================================================
 
-def fetch_listing_page(
+async def fetch_listing_page(
+    session: aiohttp.ClientSession,
     page: int,
     country: str,
 ) -> BeautifulSoup:
 
-    response = requests.get(
-        BASE_URL.format(
-            page=page,
-            country=country,
-        ),
-        headers=HEADERS,
-        timeout=30,
-    )
-
-    response.raise_for_status()
-
-    return BeautifulSoup(
-        response.text,
-        "html.parser",
-    )
+    async with session.get(
+        BASE_URL.format(page=page, country=country),
+        timeout=aiohttp.ClientTimeout(total=30),
+    ) as response:
+        response.raise_for_status()
+        html = await response.text()
+        return BeautifulSoup(html, "html.parser")
 
 
-def fetch_detail_page(
+async def fetch_detail_page(
+    session: aiohttp.ClientSession,
     source_url: str,
 ) -> BeautifulSoup:
 
-    response = requests.get(
+    async with session.get(
         source_url,
-        headers=HEADERS,
-        timeout=30,
-    )
-
-    response.raise_for_status()
-
-    return BeautifulSoup(
-        response.text,
-        "html.parser",
-    )
+        timeout=aiohttp.ClientTimeout(total=30),
+    ) as response:
+        response.raise_for_status()
+        html = await response.text()
+        return BeautifulSoup(html, "html.parser")
 
 
 # =========================================================
@@ -644,197 +636,108 @@ def save_checkpoint(
 # ORCHESTRATION
 # =========================================================
 
-def main() -> None:
+async def main() -> None:
 
     all_hospitals = []
-    
-    for country in country_list:
-    
-        
-        OUTPUT_PATH = Path(
-            f"outputs/tests/vaidam_scraper_{country}.json"
-        ) 
+    OUTPUT_PATH = Path("outputs/raw/vaidam_hospitals.json")
 
-        first_page_soup = fetch_listing_page(
-            page=1,
-            country=country,
-        )
+    async with aiohttp.ClientSession(headers=HEADERS) as session:
 
-        total_pages = extract_total_pages(
-            first_page_soup,
-        )
+        for country in country_list:
 
-        print(
-            f"Working on {country} now..."
-        )
+            try:
 
-        print(
-            f"Detected {total_pages} total pages"
-        )
+                hospital_count_tracker = len(all_hospitals)
 
-        for page in range(
-            1,
-            # total_pages + 1,
-            2
-        ):
+                first_page_soup = await fetch_listing_page(session, page=1, country=country)
+                await asyncio.sleep(1)
 
-            print(
-                f"Fetching page {page}/{total_pages}"
-            )
+                total_pages = extract_total_pages(first_page_soup)
 
-            if page == 1:
+                print(f"Working on {country} now...")
+                print(f"Detected {total_pages} total pages")
 
-                soup = first_page_soup
+                for page in range(1, total_pages + 1):
 
-            else:
+                    print(f"Fetching page {page}/{total_pages}    |   For country {country}")
 
-                soup = fetch_listing_page(
-                    page=page,
-                )
+                    if page == 1:
+                        soup = first_page_soup
+                    else:
+                        soup = await fetch_listing_page(session, page=page, country=country)
+                        await asyncio.sleep(1)
 
-            cards = extract_hospital_cards(
-                soup,
-            )
+                    cards = extract_hospital_cards(soup)
 
-            if not cards:
+                    if not cards:
+                        print(f"No cards found on page {page}")
+                        break
 
-                print(
-                    f"No cards found on page {page}"
-                )
+                    # Step 1 — extract card metadata synchronously (just BS4 parsing, fast)
+                    card_data_list = []
+                    for card in cards:
+                        location_data = extract_location(card)
+                        card_data_list.append({
+                            "location_data": location_data,
+                            "hospital_name": extract_hospital_name(card, city=location_data["city"]),
+                            "source_url": extract_source_url(card),
+                            "established_year": extract_established_year(card),
+                            "bed_count": extract_bed_count(card),
+                        })
 
-                break
-
-            for card in cards:
-
-                try:
-
-                    location_data = extract_location(
-                        card,
+                    # Step 2 — fetch all detail pages on this page concurrently
+                    detail_results = await asyncio.gather(
+                        *[fetch_detail_page(session, c["source_url"]) for c in card_data_list],
+                        return_exceptions=True,
                     )
 
-                    hospital_name = (
-                        extract_hospital_name(
-                            card,
-                            city=location_data[
-                                "city"
-                            ],
-                        )
-                    )
+                    # Step 3 — process each result
+                    for card_data, detail_result in zip(card_data_list, detail_results):
 
-                    source_url = extract_source_url(
-                        card,
-                    )
+                        try:
 
-                    established_year = (
-                        extract_established_year(
-                            card,
-                        )
-                    )
+                            if isinstance(detail_result, Exception):
+                                print(f"Failed hospital: {detail_result}")
+                                continue
 
-                    bed_count = extract_bed_count(
-                        card,
-                    )
+                            detail_soup = detail_result
 
-                    detail_soup = fetch_detail_page(
-                        source_url,
-                    )
+                            hospital_data = build_hospital_data(
+                                hospital_name=card_data["hospital_name"],
+                                source_url=card_data["source_url"],
+                                established_year=card_data["established_year"],
+                                bed_count=card_data["bed_count"],
+                                location_data=card_data["location_data"],
+                                raw_address=extract_raw_address(detail_soup),
+                                accreditations=extract_accreditations(detail_soup),
+                                specialties=extract_specialties(detail_soup),
+                                overview_raw=extract_overview_raw(detail_soup),
+                                infrastructure_raw=extract_infrastructure_raw(detail_soup),
+                            )
 
-                    raw_address = (
-                        extract_raw_address(
-                            detail_soup,
-                        )
-                    )
+                            hospital_data = {"record_id": len(all_hospitals) + 1, **hospital_data}
+                            all_hospitals.append(hospital_data)
 
-                    accreditations = (
-                        extract_accreditations(
-                            detail_soup,
-                        )
-                    )
+                            if len(all_hospitals) % 50 == 0:
+                                save_checkpoint(all_hospitals, OUTPUT_PATH)
+                                print(f"Checkpoint saved after {len(all_hospitals)} hospitals")
 
-                    specialties = (
-                        extract_specialties(
-                            detail_soup,
-                        )
-                    )
+                        except Exception as error:
+                            print(f"Failed hospital: {error}")
+                            continue
 
-                    overview_raw = (
-                        extract_overview_raw(
-                            detail_soup,
-                        )
-                    )
+            except Exception as country_error:
+                print(f"COUNTRY FAILED — {country}: {country_error}")
+                save_checkpoint(all_hospitals, OUTPUT_PATH)
+                print(f"Emergency checkpoint saved with {len(all_hospitals)} hospitals")
+                continue
 
-                    infrastructure_raw = (
-                        extract_infrastructure_raw(
-                            detail_soup,
-                        )
-                    )
+            save_checkpoint(all_hospitals, OUTPUT_PATH)
+            print(f"Saved {len(all_hospitals) - hospital_count_tracker} hospitals from {country}")
+            print("\n Switching to next country now.\n\n")
 
-                    hospital_data = (
-                        build_hospital_data(
-                            hospital_name=hospital_name,
-                            source_url=source_url,
-                            established_year=established_year,
-                            bed_count=bed_count,
-                            location_data=location_data,
-                            raw_address=raw_address,
-                            accreditations=accreditations,
-                            specialties=specialties,
-                            overview_raw=overview_raw,
-                            infrastructure_raw=infrastructure_raw,
-                        )
-                    )
-
-                    all_hospitals.append(
-                        hospital_data
-                    )
-
-                    if len(
-                        all_hospitals
-                    ) % 50 == 0:
-
-                        save_checkpoint(
-                            all_hospitals,
-                            OUTPUT_PATH,
-                        )
-
-                        print(
-                            f"Checkpoint saved after {len(all_hospitals)} hospitals"
-                        )
-
-                except Exception as error:
-
-                    print(
-                        f"Failed hospital: {error}"
-                    )
-
-                    continue
-
-        for index, hospital in enumerate(
-            all_hospitals,
-            start=1,
-        ):
-
-            all_hospitals[
-                index - 1
-            ] = {
-                "record_id": index,
-                **hospital,
-            }
-
-        save_checkpoint(
-            all_hospitals,
-            OUTPUT_PATH,
-        )
-
-        print(
-            f"Saved {len(all_hospitals)} hospitals to {OUTPUT_PATH}"
-        )
-
-        print(
-            "\n Switching to next country now.\n\n"
-        )
+        print(f"Extraction Finished   -   {len(all_hospitals)} Hospitals extracted in total")
 
 
 if __name__ == "__main__":
-
-    main()
+    asyncio.run(main())
