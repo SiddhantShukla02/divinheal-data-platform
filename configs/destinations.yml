@@ -1,0 +1,48 @@
+# -----------------------------------------------------------------------------
+# DESTINATION COUNTRY CONFIG
+# -----------------------------------------------------------------------------
+# PURPOSE:
+#   Defines destination countries supported by the first multi-destination
+#   patient-country profile pipeline.
+#
+# INPUT:
+#   Manually curated destination list based on current Divinheal planning.
+#
+# PROCESS:
+#   Pipelines can read this file to generate origin country × destination country
+#   profile rows.
+#
+# OUTPUT:
+#   Destination country metadata for pipeline generation.
+#
+# NOTES:
+#   - This config is intentionally small for v1.
+#   - Add fields only when the pipeline needs them.
+#   - Keep slugs stable because they may become record keys later.
+# -----------------------------------------------------------------------------
+
+destinations:
+  - destination_country_slug: india
+    destination_country_name: India
+    destination_region: South Asia
+    destination_currency_code: INR
+
+  - destination_country_slug: thailand
+    destination_country_name: Thailand
+    destination_region: Southeast Asia
+    destination_currency_code: THB
+
+  - destination_country_slug: malaysia
+    destination_country_name: Malaysia
+    destination_region: Southeast Asia
+    destination_currency_code: MYR
+
+  - destination_country_slug: turkey
+    destination_country_name: Turkey
+    destination_region: West Asia / Europe
+    destination_currency_code: TRY
+
+  - destination_country_slug: south-korea
+    destination_country_name: South Korea
+    destination_region: East Asia
+    destination_currency_code: KRW

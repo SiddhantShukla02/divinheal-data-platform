@@ -1,0 +1,89 @@
+# -----------------------------------------------------------------------------
+# ORIGIN COUNTRY CONFIG
+# -----------------------------------------------------------------------------
+# PURPOSE:
+#   Defines patient/origin countries used by the first multi-destination
+#   patient-country profile pipeline.
+#
+# INPUT:
+#   Manually curated origin country list based on current Divinheal planning.
+#
+# PROCESS:
+#   Pipelines can read this file and combine it with configs/destinations.yml
+#   to generate origin country × destination country profile rows.
+#
+# OUTPUT:
+#   Origin country metadata for pipeline generation.
+#
+# NOTES:
+#   - This config is intentionally separate from reference schemas.
+#   - Reference CSVs are not the source of truth for which countries to process.
+#   - Add only stable identity fields here.
+#   - Enrichment fields such as population, FX, treatment demand, embassy data,
+#     and outbound medical travel should come from source adapters later.
+# -----------------------------------------------------------------------------
+
+origin_countries:
+  - origin_country_slug: bangladesh
+    origin_country_name: Bangladesh
+    origin_country_name_local: বাংলাদেশ
+    origin_iso_country_code: BD
+    origin_primary_locale: bn
+    origin_secondary_locales: en
+    origin_currency_code: BDT
+
+  - origin_country_slug: ethiopia
+    origin_country_name: Ethiopia
+    origin_country_name_local: ኢትዮጵያ
+    origin_iso_country_code: ET
+    origin_primary_locale: am
+    origin_secondary_locales: en
+    origin_currency_code: ETB
+
+  - origin_country_slug: iraq
+    origin_country_name: Iraq
+    origin_country_name_local: العراق
+    origin_iso_country_code: IQ
+    origin_primary_locale: ar
+    origin_secondary_locales: ku;en
+    origin_currency_code: IQD
+
+  - origin_country_slug: kenya
+    origin_country_name: Kenya
+    origin_country_name_local: Kenya
+    origin_iso_country_code: KE
+    origin_primary_locale: en
+    origin_secondary_locales: sw
+    origin_currency_code: KES
+
+  - origin_country_slug: nigeria
+    origin_country_name: Nigeria
+    origin_country_name_local: Nigeria
+    origin_iso_country_code: NG
+    origin_primary_locale: en
+    origin_secondary_locales: ""
+    origin_currency_code: NGN
+
+  - origin_country_slug: united-arab-emirates
+    origin_country_name: United Arab Emirates
+    origin_country_name_local: الإمارات العربية المتحدة
+    origin_iso_country_code: AE
+    origin_primary_locale: ar
+    origin_secondary_locales: en
+    origin_currency_code: AED
+
+  - origin_country_slug: united-kingdom
+    origin_country_name: United Kingdom
+    origin_country_name_local: United Kingdom
+    origin_iso_country_code: GB
+    origin_primary_locale: en
+    origin_secondary_locales: ""
+    origin_currency_code: GBP
+
+  - origin_country_slug: united-states
+    origin_country_name: United States
+    origin_country_name_local: United States
+    origin_iso_country_code: US
+    origin_primary_locale: en
+    origin_secondary_locales: es
+    origin_currency_code: USD

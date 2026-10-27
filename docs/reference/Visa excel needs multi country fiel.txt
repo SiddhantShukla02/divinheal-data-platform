@@ -1,0 +1,53 @@
+Visa excel needs multi country fields, not only india based.
+
+Many tables will need a Destination Country slug , as it is a multi country->destination plan
+
+
+All-in-One scrapers are not practical and will end up messy. We have to make this a proper data collection program with multiple sources of verified data -- Scrapers, APIs, AI extraction, and manual reviewing.
+
+
+
+
+
+We should not have a basic fallback for missing data, we should make a proper error handling system so that its very easy and intuitive to figure out source of error and handle it quickly and easily.
+
+Regarding the above we need to plan status tags, which will help in organising the data as it comes. For example : verified, needs_review, missing_source, stale, source_failed, rejected etc.
+
+If visa documents for Turkey × Bangladesh cannot be fetched, the system should not assume anything. It should create a missing_data record with source_attempted, failure_reason, and next_action.
+
+Every generated row should have a data status. Missing or failed fields should be tracked explicitly instead of hidden inside logs.
+
+
+
+
+We can break data collection into a set of core entities, then different data points can just be a relation between those entities.
+
+Some core entities: country, destination, treatment, hospital, doctors
+
+Data map:
+
+visa_rules : Country x Destination
+flights: origin x destination
+hospital_treatment : hospital x treatment x destination
+
+This will help in making a Huge set of data and reduce duplication risk.
+
+
+
+Will need to decide a refresh cycle for data sets, as discussed. Will help in updating data over time.
+
+
+
+
+Can have a system that ranks data entries based on confidence score.
+If an official source is present along with source url and multiple sources agree == High confidence
+
+if data is old , was extracted from a messy blog page, and has conflicting values over multiple sources === Low confidence / Needs review.
+
+This will help in prioritising what needs to be reviewed first.
+
+
+
+Most important will be weeding out false / inaccurate data from our data set, as it can BE HELL TO FIX LATER.
+
+I really think that before coding anything we need to first think about where we will get our data from and finalise the schema + what needs to be automated and what semi automated.

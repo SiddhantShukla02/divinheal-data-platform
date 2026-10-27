@@ -1,0 +1,24 @@
+faq_id,treatment_slug,patient_country_slug,locale,question_text,source_type,serp_position,verified_date
+F-IVF-BD-EN-01,ivf,bangladesh,en,How much does IVF cost in India for Bangladeshi patients?,paa,1,2026-01-14
+F-IVF-BD-EN-02,ivf,bangladesh,en,Is the medical visa for India easy to get from Bangladesh?,paa,2,2026-01-14
+F-IVF-BD-EN-03,ivf,bangladesh,en,Are there Bengali-speaking doctors at Indian IVF hospitals?,enquiry_log,,2026-01-14
+F-IVF-BD-EN-04,ivf,bangladesh,en,What is the IVF success rate in India compared to Bangladesh?,paa,3,2026-01-14
+F-IVF-BD-EN-05,ivf,bangladesh,en,How long do I need to stay in India for one IVF cycle?,quora,,2026-01-14
+F-IVF-BD-EN-06,ivf,bangladesh,en,Can my husband travel with me on a medical attendant visa?,paa,4,2026-01-14
+F-IVF-ET-EN-01,ivf,ethiopia,en,How much does IVF cost in India compared to Ethiopia?,paa,1,2026-01-14
+F-IVF-ET-EN-02,ivf,ethiopia,en,Are Amharic-speaking coordinators available at Indian IVF hospitals?,enquiry_log,,2026-01-14
+F-IVF-ET-EN-03,ivf,ethiopia,en,How do Ethiopian patients get a medical visa for India?,paa,2,2026-01-14
+F-IVF-ET-EN-04,ivf,ethiopia,en,What is the typical stay duration for IVF treatment in India?,paa,3,2026-01-14
+F-IVF-SA-AR-01,ivf,saudi_arabia,ar,كم تكلفة عملية أطفال الأنابيب في الهند للسعوديين؟,paa,1,2026-01-14
+F-IVF-SA-AR-02,ivf,saudi_arabia,ar,هل يتوفر أطباء يتحدثون العربية في مستشفيات الخصوبة في الهند؟,paa,2,2026-01-14
+F-IVF-SA-AR-03,ivf,saudi_arabia,ar,هل يقدم الطعام الحلال في المستشفيات الهندية؟,enquiry_log,,2026-01-14
+F-IVF-SA-AR-04,ivf,saudi_arabia,ar,هل يمكن للمريضات طلب طبيبات إناث؟,enquiry_log,,2026-01-14
+F-CABG-ET-EN-01,cardiac-bypass-surgery,ethiopia,en,How much does bypass surgery cost in India for Ethiopian patients?,paa,1,2026-01-14
+F-CABG-ET-EN-02,cardiac-bypass-surgery,ethiopia,en,What is the wait time for bypass surgery in India?,paa,2,2026-01-14
+F-CABG-ET-EN-03,cardiac-bypass-surgery,ethiopia,en,Which Indian hospitals have the highest cardiac surgery volumes?,paa,3,2026-01-14
+F-CABG-ET-EN-04,cardiac-bypass-surgery,ethiopia,en,How long do I stay in India for bypass surgery?,quora,,2026-01-14
+F-CABG-BD-EN-01,cardiac-bypass-surgery,bangladesh,en,How much does bypass surgery cost in India for Bangladeshi patients?,paa,1,2026-01-14
+F-CABG-BD-EN-02,cardiac-bypass-surgery,bangladesh,en,What is the success rate of bypass surgery in India?,paa,2,2026-01-14
+F-KNEE-UK-EN-01,knee-replacement,united_kingdom,en,Why are UK patients going to India for knee replacement?,paa,1,2026-01-14
+F-KNEE-UK-EN-02,knee-replacement,united_kingdom,en,How much does knee replacement cost in India for UK patients?,paa,2,2026-01-14
+F-KNEE-UK-EN-03,knee-replacement,united_kingdom,en,Is knee replacement in India safe?,paa,3,2026-01-14
